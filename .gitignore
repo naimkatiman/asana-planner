@@ -40,3 +40,6 @@ temp/
 # Build artifacts
 dist/
 build/
+
+# Local Netlify folder
+.netlify

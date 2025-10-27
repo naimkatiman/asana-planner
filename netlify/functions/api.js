@@ -24,6 +24,29 @@ function getCreds(headers) {
   };
 }
 
+async function createAsanaClient(token) {
+  const mod = asana || {};
+  let ClientObj = mod.Client || (mod.default && mod.default.Client);
+  if (!ClientObj) {
+    try {
+      const esm = await import('asana');
+      ClientObj = esm.Client || (esm.default && esm.default.Client);
+      if (!ClientObj) {
+        try {
+          console.error('Asana Client unavailable after dynamic import', { keys: Object.keys(esm || {}), hasDefault: !!esm?.default });
+        } catch (_) {}
+        throw new Error('Asana Client not available');
+      }
+    } catch (e) {
+      try {
+        console.error('Asana dynamic import failed', { message: e?.message });
+      } catch (_) {}
+      throw new Error('Asana Client not available');
+    }
+  }
+  return ClientObj.create().useAccessToken(token);
+}
+
 async function getTasks(client, creds) {
   let tasks = [];
   if (creds.projectGid) {
@@ -54,13 +77,25 @@ exports.handler = async (event) => {
     return jsonResponse(200, {});
   }
 
-  const route = (event.path || '').replace(/^\/\.netlify\/functions\/api/, '') || '/';
+  const originalPath = event.path || '';
+  let route = originalPath.replace(/^\/\.netlify\/functions\/api/, '');
+  route = route.replace(/^\/api/, '');
+  if (!route) route = '/';
   const creds = getCreds(event.headers);
+  console.log('api handler', {
+    path: originalPath,
+    method: event.httpMethod,
+    route,
+    hasToken: !!creds.token,
+    hasWorkspace: !!creds.workspaceGid,
+    hasProject: !!creds.projectGid,
+    hasUser: !!creds.userGid,
+  });
 
   try {
     if (route === '/workspaces' && event.httpMethod === 'GET') {
       if (!creds.token) return jsonResponse(400, { error: 'Please configure token first' });
-      const client = asana.Client.create().useAccessToken(creds.token);
+      const client = await createAsanaClient(creds.token);
       const workspaces = await client.workspaces.getWorkspaces();
       const workspacesList = await workspaces.collect();
       return jsonResponse(200, { success: true, workspaces: workspacesList });
@@ -69,7 +104,7 @@ exports.handler = async (event) => {
     if (route === '/projects' && event.httpMethod === 'GET') {
       if (!creds.token || !creds.workspaceGid)
         return jsonResponse(400, { error: 'Please configure token and workspace first' });
-      const client = asana.Client.create().useAccessToken(creds.token);
+      const client = await createAsanaClient(creds.token);
       const projects = await client.projects.getProjectsForWorkspace(creds.workspaceGid);
       const projectsList = await projects.collect();
       return jsonResponse(200, { success: true, projects: projectsList });
@@ -77,14 +112,14 @@ exports.handler = async (event) => {
 
     if (route === '/tasks' && event.httpMethod === 'GET') {
       if (!creds.token) return jsonResponse(400, { error: 'Please configure credentials first' });
-      const client = asana.Client.create().useAccessToken(creds.token);
+      const client = await createAsanaClient(creds.token);
       const tasks = await getTasks(client, creds);
       return jsonResponse(200, { success: true, tasks, count: tasks.length });
     }
 
     if (route === '/plan/weekly' && event.httpMethod === 'POST') {
       if (!creds.token) return jsonResponse(400, { error: 'Please configure credentials first' });
-      const client = asana.Client.create().useAccessToken(creds.token);
+      const client = await createAsanaClient(creds.token);
       let tasks = [];
       if (creds.projectGid) {
         const projectTasks = await client.tasks.getTasksForProject(creds.projectGid, {
@@ -118,7 +153,7 @@ exports.handler = async (event) => {
 
     if (route === '/brainstorm' && event.httpMethod === 'POST') {
       if (!creds.token) return jsonResponse(400, { error: 'Please configure credentials first' });
-      const client = asana.Client.create().useAccessToken(creds.token);
+      const client = await createAsanaClient(creds.token);
       let tasks = [];
       if (creds.projectGid) {
         const projectTasks = await client.tasks.getTasksForProject(creds.projectGid, {
@@ -191,7 +226,12 @@ exports.handler = async (event) => {
       });
     }
 
-    return jsonResponse(404, { error: 'Not found' });
+    console.warn('Route not found', { route, method: event.httpMethod, path: event.path });
+    return jsonResponse(404, {
+      error: 'Not found',
+      details: `No handler for ${event.httpMethod} ${route}`,
+      hint: 'Valid routes: GET /workspaces, GET /projects, GET /tasks, POST /plan/weekly, POST /brainstorm',
+    });
   } catch (error) {
     console.error('Function error:', error);
     return jsonResponse(500, { error: 'Internal Error', details: error.message });

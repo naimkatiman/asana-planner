@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Asana Task Planner & Fetcher</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .card h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.5rem;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e1e8ed;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .form-group small {
+            display: block;
+            margin-top: 5px;
+            color: #888;
+            font-size: 12px;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+
+        .status-configured {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-not-configured {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .tabs {
+            display: flex;
+            border-bottom: 2px solid #e1e8ed;
+            margin-bottom: 20px;
+            gap: 10px;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            background: none;
+            border: none;
+            color: #666;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .task-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border-left: 4px solid #667eea;
+        }
+
+        .task-item.overdue {
+            border-left-color: #f5576c;
+            background: #fff5f5;
+        }
+
+        .task-item.completed {
+            opacity: 0.6;
+            border-left-color: #51cf66;
+        }
+
+        .task-name {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .task-meta {
+            font-size: 13px;
+            color: #666;
+        }
+
+        .tag {
+            display: inline-block;
+            background: #e7f3ff;
+            color: #0066cc;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-right: 5px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .suggestion-item {
+            background: #fff9e6;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+
+        .suggestion-item.critical {
+            background: #fff5f5;
+            border-left-color: #f5576c;
+        }
+
+        .suggestion-item.high {
+            background: #fff3e0;
+            border-left-color: #ff9800;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+
+        .error {
+            background: #fff5f5;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #f5576c;
+            margin-bottom: 15px;
+        }
+
+        .success {
+            background: #d4edda;
+            color: #155724;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #51cf66;
+            margin-bottom: 15px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.8rem;
+            }
+            
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 Asana Task Planner & Fetcher</h1>
+            <p>Automate your Asana workflow with intelligent planning and brainstorming</p>
+        </div>
+
+        <!-- Configuration Card -->
+        <div class="card">
+            <h2>⚙️ Configuration <span id="configStatus" class="status-badge status-not-configured">Not Configured</span></h2>
+            <form id="credentialsForm">
+                <div class="form-group">
+                    <label for="token">Personal Access Token *</label>
+                    <input type="password" id="token" placeholder="Enter your Asana Personal Access Token" required>
+                    <small>Get your token from: <a href="https://app.asana.com/0/my-apps" target="_blank">Asana Developer Console</a></small>
+                </div>
+                <div class="form-group">
+                    <label for="workspaceGid">Workspace GID (Optional)</label>
+                    <input type="text" id="workspaceGid" placeholder="e.g., 1234567890123456">
+                    <small>Leave empty to fetch all workspaces after saving token</small>
+                </div>
+                <div class="form-group">
+                    <label for="projectGid">Project GID (Optional)</label>
+                    <input type="text" id="projectGid" placeholder="e.g., 1234567890123456">
+                    <small>Filter tasks by specific project</small>
+                </div>
+                <div class="form-group">
+                    <label for="userGid">User GID (Optional)</label>
+                    <input type="text" id="userGid" placeholder="e.g., 1234567890123456">
+                    <small>Filter tasks by specific user/assignee</small>
+                </div>
+                <button type="submit" class="btn">💾 Save Credentials</button>
+                <button type="button" class="btn btn-secondary" onclick="fetchWorkspaces()">📋 Fetch Workspaces</button>
+                <button type="button" class="btn btn-secondary" onclick="fetchProjects()">📁 Fetch Projects</button>
+            </form>
+            <div id="credentialsMessage"></div>
+        </div>
+
+        <!-- Main Dashboard -->
+        <div class="card">
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('tasks')">📝 Tasks</button>
+                <button class="tab" onclick="switchTab('planning')">📅 Planning</button>
+                <button class="tab" onclick="switchTab('brainstorm')">💡 Brainstorm</button>
+            </div>
+
+            <!-- Tasks Tab -->
+            <div id="tasksTab" class="tab-content active">
+                <button class="btn" onclick="fetchTasks()">🔄 Fetch Tasks</button>
+                <div id="tasksContent"></div>
+            </div>
+
+            <!-- Planning Tab -->
+            <div id="planningTab" class="tab-content">
+                <button class="btn btn-success" onclick="generateWeeklyPlan()">📊 Generate Weekly Plan</button>
+                <div id="planningContent"></div>
+            </div>
+
+            <!-- Brainstorm Tab -->
+            <div id="brainstormTab" class="tab-content">
+                <button class="btn btn-secondary" onclick="runBrainstorm()">🧠 Analyze & Get Insights</button>
+                <div id="brainstormContent"></div>
+            </div>
+        </div>
+    </div>
+
+  <script>
+        const API_URL = window.location.origin + '/api';
+
+        function loadCredsFromStorage() {
+            return {
+                token: localStorage.getItem('asana_token') || '',
+                workspaceGid: localStorage.getItem('asana_workspace_gid') || '',
+                projectGid: localStorage.getItem('asana_project_gid') || '',
+                userGid: localStorage.getItem('asana_user_gid') || ''
+            };
+        }
+
+        function saveCredsToStorage(creds) {
+            localStorage.setItem('asana_token', creds.token || '');
+            localStorage.setItem('asana_workspace_gid', creds.workspaceGid || '');
+            localStorage.setItem('asana_project_gid', creds.projectGid || '');
+            localStorage.setItem('asana_user_gid', creds.userGid || '');
+        }
+
+        function buildHeaders() {
+            const creds = loadCredsFromStorage();
+            const headers = { 'Content-Type': 'application/json' };
+            if (creds.token) headers['x-asana-token'] = creds.token;
+            if (creds.workspaceGid) headers['x-workspace-gid'] = creds.workspaceGid;
+            if (creds.projectGid) headers['x-project-gid'] = creds.projectGid;
+            if (creds.userGid) headers['x-user-gid'] = creds.userGid;
+            return headers;
+        }
+
+        function updateConfigStatus() {
+            const creds = loadCredsFromStorage();
+            const statusBadge = document.getElementById('configStatus');
+            if (creds.token) {
+                statusBadge.textContent = 'Configured ✓';
+                statusBadge.className = 'status-badge status-configured';
+            } else {
+                statusBadge.textContent = 'Not Configured';
+                statusBadge.className = 'status-badge status-not-configured';
+            }
+        }
+
+        function prefillFormFromStorage() {
+            const creds = loadCredsFromStorage();
+            document.getElementById('token').value = creds.token;
+            document.getElementById('workspaceGid').value = creds.workspaceGid;
+            document.getElementById('projectGid').value = creds.projectGid;
+            document.getElementById('userGid').value = creds.userGid;
+        }
+
+        // Initialize UI from local storage
+        prefillFormFromStorage();
+        updateConfigStatus();
+
+        function switchTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            
+            // Show selected tab
+            document.getElementById(tabName + 'Tab').classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        document.getElementById('credentialsForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            
+            const credentials = {
+                token: document.getElementById('token').value,
+                workspaceGid: document.getElementById('workspaceGid').value,
+                projectGid: document.getElementById('projectGid').value,
+                userGid: document.getElementById('userGid').value
+            };
+
+            saveCredsToStorage(credentials);
+            const msgDiv = document.getElementById('credentialsMessage');
+            msgDiv.innerHTML = '<div class="success">✅ Credentials saved locally!</div>';
+            updateConfigStatus();
+        });
+
+        async function fetchWorkspaces() {
+            const contentDiv = document.getElementById('credentialsMessage');
+            contentDiv.innerHTML = '<div class="loading">⏳ Fetching workspaces...</div>';
+
+            try {
+                const response = await fetch(`${API_URL}/workspaces`, { headers: buildHeaders() });
+                const data = await response.json();
+
+                if (data.success) {
+                    let html = '<div class="success"><strong>Available Workspaces:</strong><br>';
+                    data.workspaces.forEach(ws => {
+                        html += `<div style="margin-top:10px;">
+                            <strong>${ws.name}</strong><br>
+                            GID: <code>${ws.gid}</code>
+                        </div>`;
+                    });
+                    html += '</div>';
+                    contentDiv.innerHTML = html;
+                } else {
+                    contentDiv.innerHTML = `<div class="error">❌ ${data.error}</div>`;
+                }
+            } catch (error) {
+                contentDiv.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            }
+        }
+
+        async function fetchProjects() {
+            const contentDiv = document.getElementById('credentialsMessage');
+            contentDiv.innerHTML = '<div class="loading">⏳ Fetching projects...</div>';
+
+            try {
+                const response = await fetch(`${API_URL}/projects`, { headers: buildHeaders() });
+                const data = await response.json();
+
+                if (data.success) {
+                    let html = '<div class="success"><strong>Available Projects:</strong><br>';
+                    data.projects.forEach(proj => {
+                        html += `<div style="margin-top:10px;">
+                            <strong>${proj.name}</strong><br>
+                            GID: <code>${proj.gid}</code>
+                        </div>`;
+                    });
+                    html += '</div>';
+                    contentDiv.innerHTML = html;
+                } else {
+                    contentDiv.innerHTML = `<div class="error">❌ ${data.error}</div>`;
+                }
+            } catch (error) {
+                contentDiv.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            }
+        }
+
+        async function fetchTasks() {
+            const contentDiv = document.getElementById('tasksContent');
+            contentDiv.innerHTML = '<div class="loading">⏳ Fetching tasks from Asana...</div>';
+
+            try {
+                const response = await fetch(`${API_URL}/tasks`, { headers: buildHeaders() });
+                const data = await response.json();
+
+                if (data.success) {
+                    if (data.tasks.length === 0) {
+                        contentDiv.innerHTML = '<div class="empty-state">📭<br>No tasks found</div>';
+                        return;
+                    }
+
+                    let html = `<div class="success">✅ Found ${data.count} tasks</div>`;
+                    
+                    data.tasks.forEach(task => {
+                        const isOverdue = task.due_on && new Date(task.due_on) < new Date() && !task.completed;
+                        const taskClass = isOverdue ? 'task-item overdue' : (task.completed ? 'task-item completed' : 'task-item');
+                        
+                        html += `<div class="${taskClass}">
+                            <div class="task-name">${task.completed ? '✅' : '⭕'} ${task.name}</div>
+                            <div class="task-meta">
+                                ${task.due_on ? `📅 Due: ${task.due_on}` : '📅 No due date'}
+                                ${task.assignee ? ` | 👤 ${task.assignee.name}` : ' | 👤 Unassigned'}
+                                ${task.tags && task.tags.length > 0 ? '<br>' + task.tags.map(t => `<span class="tag">${t.name}</span>`).join('') : ''}
+                            </div>
+                        </div>`;
+                    });
+
+                    contentDiv.innerHTML = html;
+                } else {
+                    contentDiv.innerHTML = `<div class="error">❌ ${data.error}<br><small>${data.details || ''}</small>${data.hint ? '<br><small>' + data.hint + '</small>' : ''}</div>`;
+                }
+            } catch (error) {
+                contentDiv.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            }
+        }
+
+        async function generateWeeklyPlan() {
+            const contentDiv = document.getElementById('planningContent');
+            contentDiv.innerHTML = '<div class="loading">⏳ Generating weekly plan...</div>';
+
+            try {
+                const response = await fetch(`${API_URL}/plan/weekly`, { method: 'POST', headers: buildHeaders() });
+                const data = await response.json();
+
+                if (data.success) {
+                    const plan = data.plan;
+                    let html = '<div class="stats-grid">';
+                    html += `<div class="stat-card"><div class="stat-number">${plan.overdue.length}</div><div class="stat-label">Overdue</div></div>`;
+                    html += `<div class="stat-card"><div class="stat-number">${plan.thisWeek.length}</div><div class="stat-label">This Week</div></div>`;
+                    html += `<div class="stat-card"><div class="stat-number">${plan.nextWeek.length}</div><div class="stat-label">Next Week</div></div>`;
+                    html += `<div class="stat-card"><div class="stat-number">${plan.noDueDate.length}</div><div class="stat-label">No Due Date</div></div>`;
+                    html += '</div>';
+
+                    if (plan.overdue.length > 0) {
+                        html += '<h3 style="color:#f5576c; margin-top:20px;">🚨 Overdue Tasks</h3>';
+                        plan.overdue.forEach(task => {
+                            html += `<div class="task-item overdue">
+                                <div class="task-name">${task.name}</div>
+                                <div class="task-meta">📅 Was due: ${task.due_on}</div>
+                            </div>`;
+                        });
+                    }
+
+                    if (plan.thisWeek.length > 0) {
+                        html += '<h3 style="color:#667eea; margin-top:20px;">📅 This Week</h3>';
+                        plan.thisWeek.forEach(task => {
+                            html += `<div class="task-item">
+                                <div class="task-name">${task.name}</div>
+                                <div class="task-meta">📅 Due: ${task.due_on}</div>
+                            </div>`;
+                        });
+                    }
+
+                    if (plan.nextWeek.length > 0) {
+                        html += '<h3 style="color:#4facfe; margin-top:20px;">📆 Next Week</h3>';
+                        plan.nextWeek.forEach(task => {
+                            html += `<div class="task-item">
+                                <div class="task-name">${task.name}</div>
+                                <div class="task-meta">📅 Due: ${task.due_on}</div>
+                            </div>`;
+                        });
+                    }
+
+                    contentDiv.innerHTML = html || '<div class="empty-state">📭<br>No tasks to plan</div>';
+                } else {
+                    contentDiv.innerHTML = `<div class="error">❌ ${data.error}</div>`;
+                }
+            } catch (error) {
+                contentDiv.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            }
+        }
+
+        async function runBrainstorm() {
+            const contentDiv = document.getElementById('brainstormContent');
+            contentDiv.innerHTML = '<div class="loading">⏳ Analyzing tasks and generating insights...</div>';
+
+            try {
+                const response = await fetch(`${API_URL}/brainstorm`, { method: 'POST', headers: buildHeaders() });
+                const data = await response.json();
+
+                if (data.success) {
+                    let html = '<div class="stats-grid">';
+                    html += `<div class="stat-card"><div class="stat-number">${data.analysis.totalTasks}</div><div class="stat-label">Total Tasks</div></div>`;
+                    html += `<div class="stat-card"><div class="stat-number">${data.analysis.pendingTasks}</div><div class="stat-label">Pending</div></div>`;
+                    html += `<div class="stat-card"><div class="stat-number">${data.completionRate}%</div><div class="stat-label">Completion Rate</div></div>`;
+                    html += `<div class="stat-card"><div class="stat-number">${data.analysis.overdueTasks}</div><div class="stat-label">Overdue</div></div>`;
+                    html += '</div>';
+
+                    if (data.suggestions.length > 0) {
+                        html += '<h3 style="margin-top:30px; color:#333;">💡 Suggestions & Insights</h3>';
+                        data.suggestions.forEach(sug => {
+                            html += `<div class="suggestion-item ${sug.priority}">
+                                <div style="font-weight:600; margin-bottom:5px;">${sug.message}</div>
+                                <div style="font-size:13px; color:#666;">💡 Action: ${sug.action}</div>
+                            </div>`;
+                        });
+                    }
+
+                    if (data.taskIdeas.length > 0) {
+                        html += '<h3 style="margin-top:30px; color:#333;">🎯 Task Ideas</h3>';
+                        data.taskIdeas.forEach(idea => {
+                            html += `<div class="task-item">
+                                <div class="task-name">💡 ${idea}</div>
+                            </div>`;
+                        });
+                    }
+
+                    contentDiv.innerHTML = html;
+                } else {
+                    contentDiv.innerHTML = `<div class="error">❌ ${data.error}</div>`;
+                }
+            } catch (error) {
+                contentDiv.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            }
+        }
+  </script>
+</body>
+</html>

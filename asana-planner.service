@@ -1,0 +1,27 @@
+[Unit]
+Description=Asana Task Planner & Fetcher
+Documentation=https://github.com/yourusername/asana-planner
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/var/www/asana-planner
+Environment="NODE_ENV=production"
+Environment="PORT=3000"
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=asana-planner
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/asana-planner
+
+[Install]
+WantedBy=multi-user.target

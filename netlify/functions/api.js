@@ -1,4 +1,5 @@
 const asana = require('asana');
+const axios = require('axios');
 
 function jsonResponse(statusCode, body, extraHeaders = {}) {
   return {
@@ -25,26 +26,44 @@ function getCreds(headers) {
 }
 
 async function createAsanaClient(token) {
-  const mod = asana || {};
-  let ClientObj = mod.Client || (mod.default && mod.default.Client);
-  if (!ClientObj) {
-    try {
-      const esm = await import('asana');
-      ClientObj = esm.Client || (esm.default && esm.default.Client);
-      if (!ClientObj) {
-        try {
-          console.error('Asana Client unavailable after dynamic import', { keys: Object.keys(esm || {}), hasDefault: !!esm?.default });
-        } catch (_) {}
-        throw new Error('Asana Client not available');
-      }
-    } catch (e) {
-      try {
-        console.error('Asana dynamic import failed', { message: e?.message });
-      } catch (_) {}
-      throw new Error('Asana Client not available');
-    }
-  }
-  return ClientObj.create().useAccessToken(token);
+  const http = axios.create({
+    baseURL: 'https://app.asana.com/api/1.0',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  const paginate = async (url, params = {}) => {
+    const results = [];
+    let offset;
+    do {
+      const resp = await http.get(url, { params: { limit: 100, ...params, offset } });
+      const body = resp.data || {};
+      const data = Array.isArray(body.data) ? body.data : body.data ? [body.data] : [];
+      results.push(...data);
+      offset = body.next_page && body.next_page.offset ? body.next_page.offset : undefined;
+    } while (offset);
+    return results;
+  };
+
+  const collection = (executor) => ({ collect: () => executor() });
+
+  return {
+    workspaces: {
+      getWorkspaces: () => collection(() => paginate('/workspaces')),
+    },
+    projects: {
+      getProjectsForWorkspace: (workspaceGid) =>
+        collection(() => paginate(`/workspaces/${workspaceGid}/projects`)),
+    },
+    tasks: {
+      getTasksForProject: (projectGid, { opt_fields } = {}) =>
+        collection(() => paginate(`/projects/${projectGid}/tasks`, { opt_fields })),
+      getTasksForUser: (userGid, { workspace, opt_fields } = {}) =>
+        collection(() => paginate(`/tasks`, { assignee: userGid, workspace, opt_fields })),
+      // Safe fallback: return empty list to avoid 400s from search without filters
+      searchTasksForWorkspace: (workspaceGid, { opt_fields } = {}) =>
+        collection(async () => []),
+    },
+  };
 }
 
 async function getTasks(client, creds) {

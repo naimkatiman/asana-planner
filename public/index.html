@@ -1014,7 +1014,7 @@
             hist.slice().reverse().forEach((h, idx) => {
                 const actionsCount = Array.isArray(h.actions) ? h.actions.length : 0;
                 const id = h.id || (h.ts + '_' + idx);
-                const renderedOut = renderMarkdown(h.output || '');
+                const renderedOut = renderMarkdown(unwrapAIOutput(h.output || ''));
                 html += `<div class="history-item">
                     <div class="history-meta"><strong>${esc(formatTs(h.ts))}</strong> • ${esc(h.mode || 'get')} • ${actionsCount} action(s)</div>
                     <div style="margin-top:6px;">${esc(h.prompt || '')}</div>
@@ -1065,7 +1065,7 @@
             return items.map((it, i) => {
                 const id = (it.id || i) + '_srv';
                 const actionsCount = Array.isArray(it.actions) ? it.actions.length : 0;
-                const rendered = renderMarkdown(it.output || '');
+                const rendered = renderMarkdown(unwrapAIOutput(it.output || ''));
                 return `<div class="history-item">
                     <div class="history-meta"><strong>${esc(it.created_at || '')}</strong> • ${esc(it.user_id || '')} • ${esc(it.mode || '')} • ${actionsCount} action(s)</div>
                     <div style="margin-top:6px;">${esc(it.prompt || '')}</div>
@@ -1190,6 +1190,33 @@
             await aiAsk(q);
         }
 
+        function unwrapAIOutput(raw) {
+            const s = (raw == null ? '' : String(raw));
+            const tryJson = (t) => { try { return JSON.parse(t); } catch { return null; } };
+            const decodeEsc = (t) => t.replace(/\\n/g, '\n').replace(/\\t/g, '  ').replace(/\\r/g, '');
+            let obj = tryJson(s);
+            if (!obj) {
+                const m = s.match(/```(?:json|JSON|json5|jsonc)?[ \t\r]*\n([\s\S]*?)```/);
+                if (m) obj = tryJson(m[1]);
+            }
+            if (!obj) {
+                const i = s.indexOf('{');
+                const j = s.lastIndexOf('}');
+                if (i >= 0 && j > i) obj = tryJson(s.slice(i, j + 1));
+            }
+            if (!obj) {
+                const mOut = s.match(/\"output\"\s*:\s*(\"(?:[^\"\\]|\\.)*\")/);
+                if (mOut) {
+                    try { return JSON.parse(mOut[1]); } catch {}
+                }
+            }
+            if (obj && typeof obj === 'object') {
+                if (typeof obj.output === 'string') return obj.output;
+                if (obj.output != null) return String(obj.output);
+            }
+            return decodeEsc(s);
+        }
+
         async function aiAsk(prompt) {
             const out = document.getElementById('aiOutput');
             const aiKey = loadAIKey();
@@ -1206,15 +1233,16 @@
                 });
                 const data = await resp.json();
                 if (data.success) {
-                    const rendered = renderMarkdown(data.output || '');
+                    const unwrapped = unwrapAIOutput(data.output || '');
+                    const rendered = renderMarkdown(unwrapped || '');
                     if (data.mode === 'post' && (data.actions || []).length > 0) {
                         out.innerHTML = `<div class=\"success\">Proposed changes detected. Please confirm.</div><div class=\"ai-output\">${rendered}</div>`;
                         openConfirm(data.actions, 'The AI suggests the following changes:');
                     } else {
                         out.innerHTML = `<div class=\"ai-output\">${rendered}</div>`;
                     }
-                    addHistoryEntry({ prompt, mode: data.mode, output: data.output, actions: data.actions || [] });
-                    logServerHistoryEntry({ prompt, mode: data.mode, output: data.output, actions: data.actions || [] });
+                    addHistoryEntry({ prompt, mode: data.mode, output: unwrapped, actions: data.actions || [] });
+                    logServerHistoryEntry({ prompt, mode: data.mode, output: unwrapped, actions: data.actions || [] });
                 } else {
                     out.innerHTML = `<div class=\"error\">❌ ${data.error || 'AI error'}</div>`;
                 }

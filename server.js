@@ -144,11 +144,11 @@ app.post('/api/ai/query', async (req, res) => {
         const messages = [
             {
                 role: 'system',
-                content: 'You are an assistant for Asana task planning. Always respond with a single JSON object. Keys: mode ("get" or "post"), output (string), actions (optional array). Use mode="get" for informational queries. Use mode="post" only when the user asks to create, update, or edit. When using mode="post", propose actions only and do not assume execution. Allowed actions: {type:"update_task", task_gid, fields:{...}} | {type:"create_subtask", parent_task_gid, fields:{name, due_on?, assignee?, notes?}} | {type:"comment_task", task_gid, text}. Keep output concise and actionable.'
+                content: 'You are an assistant for Asana task planning. Always respond with a single JSON object. Keys: mode ("get" or "post"), output (string), actions (optional array). Use mode="get" for informational queries. Use mode="post" only when the user asks to create, update, or edit. When using mode="post", propose actions only and do not assume execution. Allowed actions: {type:"update_task", task_gid, fields:{...}} | {type:"create_subtask", parent_task_gid, fields:{name, due_on?, assignee?, notes?}} | {type:"comment_task", task_gid, text} | {type:"create_task", fields:{name, notes?, due_on?, assignee_email?, projects?, workspace? , tags?}} | {type:"assign_task", task_gid, assignee_email?, assignee_gid?} | {type:"set_tags", task_gid, tags?:string[], remove_tags?:string[]} | {type:"set_section", task_gid, project_gid?, section_gid?, section_name?} | {type:"complete_task", task_gid, completed?}. Prefer names for tags/sections; the app will resolve them. If project_gid/workspace are omitted, the app will use configured defaults. Keep output concise and actionable.'
             },
             {
                 role: 'user',
-                content: `${prompt}\n\nContext JSON:\n${JSON.stringify({ tasks: tasksBrief })}`
+                content: `${prompt}\n\nContext JSON:\n${JSON.stringify({ tasks: tasksBrief, workspace_gid: credentials.workspaceGid || null, project_gid: credentials.projectGid || null })}`
             }
         ];
 
@@ -220,6 +220,179 @@ app.post('/api/ai/execute', async (req, res) => {
                     results.push({ index: i, type: a.type, ok: true, gid: a.task_gid, data: r.data && r.data.data });
                     continue;
                 }
+                if (a.type === 'create_task' && a.fields && a.fields.name) {
+                    const f = a.fields || {};
+                    const payload = { name: f.name };
+                    if (f.notes) payload.notes = f.notes;
+                    if (f.due_on) payload.due_on = f.due_on;
+                    if (f.workspace) payload.workspace = f.workspace;
+                    if (!payload.workspace && credentials.workspaceGid) payload.workspace = credentials.workspaceGid;
+                    if (Array.isArray(f.projects) && f.projects.length) payload.projects = f.projects;
+                    else if (credentials.projectGid) payload.projects = [credentials.projectGid];
+                    if (f.assignee) payload.assignee = f.assignee;
+                    if (f.assignee_email && payload.workspace) {
+                        try {
+                            const u = await http.get(`/users`, { params: { workspace: payload.workspace, email: f.assignee_email } });
+                            const udata = u.data && u.data.data;
+                            if (udata && ((Array.isArray(udata) && udata[0]) || udata.gid)) {
+                                const user = Array.isArray(udata) ? udata[0] : udata;
+                                payload.assignee = user.gid;
+                            }
+                        } catch {}
+                    }
+                    const cr = await http.post(`/tasks`, { data: payload });
+                    const created = cr.data && cr.data.data;
+                    if (created && Array.isArray(f.tags) && f.tags.length) {
+                        let wgid = payload.workspace;
+                        if (!wgid) {
+                            try {
+                                const t = await http.get(`/tasks/${created.gid}`, { params: { opt_fields: 'workspace' } });
+                                wgid = t.data && t.data.data && t.data.data.workspace && t.data.data.workspace.gid;
+                            } catch {}
+                        }
+                        if (wgid) {
+                            let offset;
+                            const tagMap = {};
+                            try {
+                                do {
+                                    const tr = await http.get(`/tags`, { params: { workspace: wgid, limit: 100, offset, opt_fields: 'name' } });
+                                    const body = tr.data || {};
+                                    const arr = Array.isArray(body.data) ? body.data : [];
+                                    arr.forEach(tg => { if (tg && tg.name) tagMap[tg.name.toLowerCase()] = tg.gid; });
+                                    offset = body.next_page && body.next_page.offset ? body.next_page.offset : undefined;
+                                } while (offset);
+                            } catch {}
+                            for (const tn of f.tags) {
+                                if (!tn) continue;
+                                const key = String(tn).toLowerCase();
+                                let tgId = tagMap[key];
+                                if (!tgId) {
+                                    try {
+                                        const crt = await http.post(`/tags`, { data: { name: tn, workspace: wgid } });
+                                        tgId = crt.data && crt.data.data && crt.data.data.gid;
+                                        if (tgId) tagMap[key] = tgId;
+                                    } catch {}
+                                }
+                                if (tgId) {
+                                    try { await http.post(`/tasks/${created.gid}/addTag`, { data: { tag: tgId } }); } catch {}
+                                }
+                            }
+                        }
+                    }
+                    results.push({ index: i, type: a.type, ok: true, gid: created && created.gid, data: created });
+                    continue;
+                }
+                if (a.type === 'assign_task' && a.task_gid && (a.assignee_email || a.assignee_gid)) {
+                    let assignee = a.assignee_gid;
+                    let wgid = credentials.workspaceGid;
+                    if (!wgid) {
+                        try {
+                            const t = await http.get(`/tasks/${a.task_gid}`, { params: { opt_fields: 'workspace' } });
+                            wgid = t.data && t.data.data && t.data.data.workspace && t.data.data.workspace.gid;
+                        } catch {}
+                    }
+                    if (!assignee && a.assignee_email && wgid) {
+                        try {
+                            const u = await http.get(`/users`, { params: { workspace: wgid, email: a.assignee_email } });
+                            const udata = u.data && u.data.data;
+                            if (udata && ((Array.isArray(udata) && udata[0]) || udata.gid)) {
+                                const user = Array.isArray(udata) ? udata[0] : udata;
+                                assignee = user.gid;
+                            }
+                        } catch {}
+                    }
+                    if (!assignee) throw new Error('Assignee not found');
+                    const r = await http.put(`/tasks/${a.task_gid}`, { data: { assignee } });
+                    results.push({ index: i, type: a.type, ok: true, gid: a.task_gid, data: r.data && r.data.data });
+                    continue;
+                }
+                if (a.type === 'set_tags' && a.task_gid && (Array.isArray(a.tags) || Array.isArray(a.remove_tags))) {
+                    let wgid = credentials.workspaceGid;
+                    if (!wgid) {
+                        try {
+                            const t = await http.get(`/tasks/${a.task_gid}`, { params: { opt_fields: 'workspace' } });
+                            wgid = t.data && t.data.data && t.data.data.workspace && t.data.data.workspace.gid;
+                        } catch {}
+                    }
+                    if (!wgid) throw new Error('Workspace not found');
+                    const want = Array.isArray(a.tags) ? a.tags.filter(Boolean) : [];
+                    const rem = Array.isArray(a.remove_tags) ? a.remove_tags.filter(Boolean) : [];
+                    let offset;
+                    const tagMap = {};
+                    try {
+                        do {
+                            const tr = await http.get(`/tags`, { params: { workspace: wgid, limit: 100, offset, opt_fields: 'name' } });
+                            const body = tr.data || {};
+                            const arr = Array.isArray(body.data) ? body.data : [];
+                            arr.forEach(tg => { if (tg && tg.name) tagMap[tg.name.toLowerCase()] = tg.gid; });
+                            offset = body.next_page && body.next_page.offset ? body.next_page.offset : undefined;
+                        } while (offset);
+                    } catch {}
+                    for (const tn of want) {
+                        const key = String(tn).toLowerCase();
+                        let tgId = tagMap[key];
+                        if (!tgId) {
+                            try {
+                                const crt = await http.post(`/tags`, { data: { name: tn, workspace: wgid } });
+                                tgId = crt.data && crt.data.data && crt.data.data.gid;
+                                if (tgId) tagMap[key] = tgId;
+                            } catch {}
+                        }
+                        if (tgId) {
+                            try { await http.post(`/tasks/${a.task_gid}/addTag`, { data: { tag: tgId } }); } catch {}
+                        }
+                    }
+                    for (const tn of rem) {
+                        const key = String(tn).toLowerCase();
+                        const tgId = tagMap[key];
+                        if (tgId) {
+                            try { await http.post(`/tasks/${a.task_gid}/removeTag`, { data: { tag: tgId } }); } catch {}
+                        }
+                    }
+                    results.push({ index: i, type: a.type, ok: true, gid: a.task_gid });
+                    continue;
+                }
+                if (a.type === 'set_section' && a.task_gid && (a.project_gid || credentials.projectGid) && (a.section_gid || a.section_name)) {
+                    const project = a.project_gid || credentials.projectGid;
+                    let section = a.section_gid;
+                    if (!section && a.section_name) {
+                        try {
+                            let offset;
+                            let found;
+                            do {
+                                const sr = await http.get(`/projects/${project}/sections`, { params: { limit: 100, offset } });
+                                const body = sr.data || {};
+                                const arr = Array.isArray(body.data) ? body.data : [];
+                                found = arr.find(s => s && s.name && s.name.toLowerCase() === String(a.section_name).toLowerCase());
+                                offset = body.next_page && body.next_page.offset ? body.next_page.offset : undefined;
+                            } while (!section && offset);
+                            if (found && found.gid) section = found.gid;
+                            if (!section) {
+                                const crs = await http.post(`/projects/${project}/sections`, { data: { name: a.section_name } });
+                                section = crs.data && crs.data.data && crs.data.data.gid;
+                            }
+                        } catch {}
+                    }
+                    if (!section) throw new Error('Section not found');
+                    let ok = false;
+                    try {
+                        await http.post(`/tasks/${a.task_gid}/addProject`, { data: { project, section } });
+                        ok = true;
+                    } catch {
+                        try {
+                            await http.post(`/sections/${section}/addTask`, { data: { task: a.task_gid } });
+                            ok = true;
+                        } catch {}
+                    }
+                    if (!ok) throw new Error('Failed to set section');
+                    results.push({ index: i, type: a.type, ok: true, gid: a.task_gid, project, section });
+                    continue;
+                }
+                if (a.type === 'complete_task' && a.task_gid) {
+                    const r = await http.put(`/tasks/${a.task_gid}`, { data: { completed: a.completed === false ? false : true } });
+                    results.push({ index: i, type: a.type, ok: true, gid: a.task_gid, data: r.data && r.data.data });
+                    continue;
+                }
                 results.push({ index: i, type: a.type, ok: false, error: 'Unsupported or invalid action' });
             } catch (e) {
                 results.push({ index: i, type: a.type, ok: false, error: e.message });
@@ -229,6 +402,176 @@ app.post('/api/ai/execute', async (req, res) => {
     } catch (error) {
         console.error('Execute actions error:', error);
         res.status(500).json({ error: 'Failed to execute actions', details: error.message });
+    }
+});
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY || process.env.ADMIN_KEY;
+const hasSB = !!(SUPABASE_URL && SUPABASE_KEY);
+const axiosSB = hasSB ? axios.create({ baseURL: `${SUPABASE_URL}/rest/v1`, headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, timeout: 20000 }) : null;
+
+async function historyLog(entry) {
+    if (!hasSB) return { ok: false, reason: 'disabled' };
+    const action_types = Array.isArray(entry.actions) ? Array.from(new Set(entry.actions.map(x => x && x.type).filter(Boolean))) : [];
+    const payload = {
+        created_at: new Date().toISOString(),
+        user_id: entry.user_id || 'default',
+        workspace_gid: entry.workspace_gid || null,
+        project_gid: entry.project_gid || null,
+        prompt: entry.prompt || '',
+        mode: entry.mode || 'get',
+        output: entry.output || '',
+        actions: Array.isArray(entry.actions) ? entry.actions : [],
+        action_types,
+        model: entry.model || null,
+        source: entry.source || 'express',
+    };
+    const resp = await axiosSB.post('/ai_history', payload, { headers: { Prefer: 'return=representation' } });
+    return { ok: true, id: resp.data && resp.data[0] && resp.data[0].id };
+}
+
+async function historyList(q) {
+    if (!hasSB) return { ok: false, reason: 'disabled' };
+    const params = new URLSearchParams();
+    params.set('select', '*');
+    params.set('order', 'created_at.desc');
+    if (q.user_id) params.set('user_id', `eq.${q.user_id}`);
+    if (q.mode) params.set('mode', `eq.${q.mode}`);
+    if (q.project_gid) params.set('project_gid', `eq.${q.project_gid}`);
+    if (q.workspace_gid) params.set('workspace_gid', `eq.${q.workspace_gid}`);
+    if (q.action_type) params.set('action_types', `cs.{"${q.action_type}"}`);
+    if (q.start) params.set('created_at', `gte.${new Date(q.start).toISOString()}`);
+    if (q.end) params.append('created_at', `lte.${new Date(q.end).toISOString()}`);
+    const start = Math.max(0, Number(q.offset) || 0);
+    const limit = Math.min(500, Math.max(1, Number(q.limit) || 50));
+    const end = start + limit - 1;
+    const resp = await axiosSB.get(`/ai_history?${params.toString()}`, { headers: { 'Range-Unit': 'items', Range: `${start}-${end}`, Prefer: 'count=exact' } });
+    return { ok: true, items: Array.isArray(resp.data) ? resp.data : [], count: Number(resp.headers['content-range']?.split('/')?.[1] || 0) };
+}
+
+async function historyPurge(p, adminHeader) {
+    if (!hasSB) return { ok: false, reason: 'disabled' };
+    if (!ADMIN_API_KEY || adminHeader !== ADMIN_API_KEY) return { ok: false, reason: 'forbidden' };
+    const params = new URLSearchParams();
+    let beforeTs = p.before ? new Date(p.before).toISOString() : null;
+    if (!beforeTs && p.retention_days) {
+        const d = new Date();
+        d.setDate(d.getDate() - Number(p.retention_days));
+        beforeTs = d.toISOString();
+    }
+    if (!beforeTs) return { ok: false, reason: 'missing_threshold' };
+    params.set('created_at', `lt.${beforeTs}`);
+    if (p.user_id) params.set('user_id', `eq.${p.user_id}`);
+    await axiosSB.delete(`/ai_history?${params.toString()}`, { headers: { Prefer: 'return=minimal' } });
+    return { ok: true };
+}
+
+async function historyExport(q, format) {
+    const list = await historyList(q);
+    if (!list.ok) return list;
+    if (format === 'csv') {
+        const cols = ['id', 'created_at', 'user_id', 'workspace_gid', 'project_gid', 'mode', 'action_types', 'prompt', 'output', 'actions'];
+        const esc = (v) => {
+            const s = typeof v === 'string' ? v : JSON.stringify(v || '');
+            if (s == null) return '';
+            const t = s.replace(/"/g, '""');
+            return `"${t.replace(/\n/g, ' ').slice(0, 10000)}"`;
+        };
+        const rows = [cols.join(',')];
+        list.items.forEach(it => {
+            rows.push([
+                it.id || '',
+                it.created_at || '',
+                it.user_id || '',
+                it.workspace_gid || '',
+                it.project_gid || '',
+                it.mode || '',
+                Array.isArray(it.action_types) ? it.action_types.join('|') : '',
+                it.prompt || '',
+                it.output || '',
+                JSON.stringify(it.actions || []),
+            ].map(esc).join(','));
+        });
+        return { ok: true, csv: rows.join('\n') };
+    }
+    return { ok: true, json: list.items };
+}
+
+app.post('/api/ai/history/log', async (req, res) => {
+    try {
+        const userId = req.body.user_id || req.headers['x-user-id'] || 'default';
+        const entry = {
+            user_id: userId,
+            workspace_gid: req.body.workspace_gid || credentials.workspaceGid || null,
+            project_gid: req.body.project_gid || credentials.projectGid || null,
+            prompt: req.body.prompt || '',
+            mode: req.body.mode || 'get',
+            output: req.body.output || '',
+            actions: Array.isArray(req.body.actions) ? req.body.actions : [],
+            model: req.body.model || 'google/gemini-2.5-flash',
+            source: 'express',
+        };
+        const r = await historyLog(entry);
+        if (!r.ok) return res.status(400).json({ error: 'History disabled or failed', details: r.reason });
+        res.json({ success: true, id: r.id });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to log history', details: e.message });
+    }
+});
+
+app.get('/api/ai/history/list', async (req, res) => {
+    try {
+        const q = {
+            user_id: req.query.user_id,
+            mode: req.query.mode,
+            project_gid: req.query.project_gid,
+            workspace_gid: req.query.workspace_gid,
+            action_type: req.query.action_type,
+            start: req.query.start,
+            end: req.query.end,
+            limit: req.query.limit,
+            offset: req.query.offset,
+        };
+        const r = await historyList(q);
+        if (!r.ok) return res.status(400).json({ error: 'History disabled or failed', details: r.reason });
+        res.json({ success: true, items: r.items, count: r.count });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to list history', details: e.message });
+    }
+});
+
+app.get('/api/ai/history/export', async (req, res) => {
+    try {
+        const format = req.query.format || 'json';
+        const q = {
+            user_id: req.query.user_id,
+            mode: req.query.mode,
+            project_gid: req.query.project_gid,
+            workspace_gid: req.query.workspace_gid,
+            action_type: req.query.action_type,
+            start: req.query.start,
+            end: req.query.end,
+            limit: req.query.limit,
+            offset: req.query.offset,
+        };
+        const r = await historyExport(q, format);
+        if (!r.ok) return res.status(400).json({ error: 'History disabled or failed', details: r.reason });
+        if (format === 'csv') return res.set('Content-Type', 'text/csv').send(r.csv);
+        res.json(r.json);
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to export history', details: e.message });
+    }
+});
+
+app.post('/api/ai/history/purge', async (req, res) => {
+    try {
+        const adminHeader = req.headers['x-admin-key'] || req.headers['X-Admin-Key'] || req.headers['x-admin-key'];
+        const r = await historyPurge(req.body || {}, adminHeader);
+        if (!r.ok) return res.status(403).json({ error: 'Forbidden or disabled', details: r.reason });
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: 'Failed to purge history', details: e.message });
     }
 });
 

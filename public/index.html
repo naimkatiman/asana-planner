@@ -331,6 +331,17 @@
             margin: 6px 0;
             font-size: 14px;
         }
+        .history-item {
+            background: #fff;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            padding: 12px;
+            margin: 8px 0;
+        }
+        .history-meta {
+            font-size: 12px;
+            color: #666;
+        }
     </style>
 </head>
 <body>
@@ -353,6 +364,16 @@
                     <label for="openrouterKey">OpenRouter API Key</label>
                     <input type="password" id="openrouterKey" placeholder="Enter your OpenRouter API Key">
                     <small>Required for AI features (model: google/gemini-2.5-flash)</small>
+                </div>
+                <div class="form-group">
+                    <label for="userId">User ID</label>
+                    <input type="text" id="userId" placeholder="e.g., email or username">
+                    <small>Used to attribute AI history entries</small>
+                </div>
+                <div class="form-group">
+                    <label for="adminKey">Admin Key</label>
+                    <input type="password" id="adminKey" placeholder="Optional, for admin operations like purge">
+                    <small>Only needed for purge; stored locally</small>
                 </div>
                 <div class="form-group">
                     <label for="workspaceGid">Workspace GID (Optional)</label>
@@ -419,6 +440,35 @@
                 </div>
                 <button class="btn" onclick="aiAskFromInput()">Ask AI</button>
                 <div id="aiOutput" class="ai-output"></div>
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-top:20px;">
+                    <h3 style="color:#333;">AI History</h3>
+                    <button class="btn btn-secondary" onclick="clearAIHistory()">Clear History</button>
+                </div>
+                <div id="aiHistory"></div>
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-top:30px;">
+                    <h3 style="color:#333;">Server History</h3>
+                    <div></div>
+                </div>
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:10px; margin-bottom:10px;">
+                    <div class="form-group"><label>User ID</label><input type="text" id="srvUserId"></div>
+                    <div class="form-group"><label>Mode</label><select id="srvMode" style="width:100%; padding:12px; border:2px solid #e1e8ed; border-radius:8px;"><option value="">Any</option><option value="get">get</option><option value="post">post</option></select></div>
+                    <div class="form-group"><label>Workspace GID</label><input type="text" id="srvWorkspace"></div>
+                    <div class="form-group"><label>Project GID</label><input type="text" id="srvProject"></div>
+                    <div class="form-group"><label>Action Type</label><input type="text" id="srvActionType" placeholder="e.g., create_task"></div>
+                    <div class="form-group"><label>Start</label><input type="datetime-local" id="srvStart"></div>
+                    <div class="form-group"><label>End</label><input type="datetime-local" id="srvEnd"></div>
+                    <div class="form-group"><label>Limit</label><input type="number" id="srvLimit" value="50" min="1" max="500"></div>
+                </div>
+                <div style="margin-bottom:10px;">
+                    <button class="btn" onclick="loadServerHistory()">Load</button>
+                    <button class="btn btn-secondary" onclick="exportServerHistory('json')">Export JSON</button>
+                    <button class="btn btn-secondary" onclick="exportServerHistory('csv')">Export CSV</button>
+                </div>
+                <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
+                    <input type="number" id="srvRetentionDays" placeholder="Retention days" style="flex:0 0 200px; padding:12px; border:2px solid #e1e8ed; border-radius:8px;">
+                    <button class="btn btn-secondary" onclick="purgeServerHistory()">Purge</button>
+                </div>
+                <div id="serverHistoryContent"></div>
             </div>
         </div>
     </div>
@@ -459,6 +509,18 @@
         function saveAIKey(key) {
             localStorage.setItem('openrouter_key', key || '');
         }
+        function loadUserId() {
+            return localStorage.getItem('user_id') || '';
+        }
+        function saveUserId(v) {
+            localStorage.setItem('user_id', v || '');
+        }
+        function loadAdminKey() {
+            return localStorage.getItem('admin_key') || '';
+        }
+        function saveAdminKey(v) {
+            localStorage.setItem('admin_key', v || '');
+        }
 
         function buildHeaders() {
             const creds = loadCredsFromStorage();
@@ -469,6 +531,8 @@
             if (creds.userGid) headers['x-user-gid'] = creds.userGid;
             const aiKey = loadAIKey();
             if (aiKey) headers['x-openrouter-key'] = aiKey;
+            const uid = loadUserId();
+            if (uid) headers['x-user-id'] = uid;
             return headers;
         }
 
@@ -488,14 +552,20 @@
             const creds = loadCredsFromStorage();
             document.getElementById('token').value = creds.token;
             document.getElementById('openrouterKey').value = loadAIKey();
+            document.getElementById('userId').value = loadUserId();
+            document.getElementById('adminKey').value = loadAdminKey();
             document.getElementById('workspaceGid').value = creds.workspaceGid;
             document.getElementById('projectGid').value = creds.projectGid;
             document.getElementById('userGid').value = creds.userGid;
+            document.getElementById('srvUserId').value = loadUserId();
+            document.getElementById('srvWorkspace').value = creds.workspaceGid;
+            document.getElementById('srvProject').value = creds.projectGid;
         }
 
         // Initialize UI from local storage
         prefillFormFromStorage();
         updateConfigStatus();
+        renderAIHistory();
 
         function switchTab(tabName) {
             // Hide all tabs
@@ -513,6 +583,8 @@
             const credentials = {
                 token: document.getElementById('token').value,
                 openrouterKey: document.getElementById('openrouterKey').value,
+                userId: document.getElementById('userId').value,
+                adminKey: document.getElementById('adminKey').value,
                 workspaceGid: document.getElementById('workspaceGid').value,
                 projectGid: document.getElementById('projectGid').value,
                 userGid: document.getElementById('userGid').value
@@ -520,6 +592,8 @@
 
             saveCredsToStorage(credentials);
             saveAIKey(credentials.openrouterKey);
+            saveUserId(credentials.userId);
+            saveAdminKey(credentials.adminKey);
             const msgDiv = document.getElementById('credentialsMessage');
             msgDiv.innerHTML = '<div class="success">✅ Credentials saved locally!</div>';
             updateConfigStatus();
@@ -734,6 +808,33 @@
                 if (a.type === 'comment_task') {
                     return `<div class="action-item">${idx + 1}. Comment on task <code>${a.task_gid}</code> with text: <code>${(a.text || '').toString().slice(0,200)}</code></div>`;
                 }
+                if (a.type === 'create_task') {
+                    const f = a.fields || {};
+                    const extras = [];
+                    if (f.due_on) extras.push(`due_on=${f.due_on}`);
+                    if (f.assignee_email) extras.push(`assignee_email=${f.assignee_email}`);
+                    if (Array.isArray(f.projects) && f.projects.length) extras.push(`projects=${f.projects.join(',')}`);
+                    if (Array.isArray(f.tags) && f.tags.length) extras.push(`tags=${f.tags.join(',')}`);
+                    if (f.workspace) extras.push(`workspace=${f.workspace}`);
+                    return `<div class="action-item">${idx + 1}. Create task <code>${f.name || ''}</code>${extras.length ? ' (' + extras.join(' | ') + ')' : ''}</div>`;
+                }
+                if (a.type === 'assign_task') {
+                    return `<div class="action-item">${idx + 1}. Assign task <code>${a.task_gid}</code> to ${a.assignee_email ? `<code>${a.assignee_email}</code>` : (a.assignee_gid ? `user gid <code>${a.assignee_gid}</code>` : '<em>unknown</em>')}</div>`;
+                }
+                if (a.type === 'set_tags') {
+                    const add = Array.isArray(a.tags) && a.tags.length ? a.tags.join(', ') : 'none';
+                    const rem = Array.isArray(a.remove_tags) && a.remove_tags.length ? a.remove_tags.join(', ') : 'none';
+                    return `<div class="action-item">${idx + 1}. Update tags on task <code>${a.task_gid}</code> | add: <code>${add}</code> | remove: <code>${rem}</code></div>`;
+                }
+                if (a.type === 'set_section') {
+                    const project = a.project_gid ? ` in project <code>${a.project_gid}</code>` : '';
+                    const section = a.section_name ? `<code>${a.section_name}</code>` : (a.section_gid ? `gid <code>${a.section_gid}</code>` : '<em>unknown</em>');
+                    return `<div class="action-item">${idx + 1}. Move task <code>${a.task_gid}</code> to section ${section}${project}</div>`;
+                }
+                if (a.type === 'complete_task') {
+                    const state = a.completed === false ? 'mark as incomplete' : 'mark as complete';
+                    return `<div class="action-item">${idx + 1}. ${state} task <code>${a.task_gid}</code></div>`;
+                }
                 return `<div class="action-item">${idx + 1}. Unsupported action: <code>${a.type}</code></div>`;
             }).join('');
         }
@@ -748,6 +849,206 @@
         function closeConfirm() {
             pendingActions = [];
             document.getElementById('confirmModal').classList.remove('show');
+        }
+
+        function loadAIHistory() {
+            try {
+                const raw = localStorage.getItem('ai_history') || '[]';
+                const arr = JSON.parse(raw);
+                if (Array.isArray(arr)) return arr;
+                return [];
+            } catch (e) { return []; }
+        }
+        function saveAIHistory(hist) {
+            try { localStorage.setItem('ai_history', JSON.stringify((hist || []).slice(-100))); } catch (e) {}
+        }
+        function formatTs(ts) {
+            const d = new Date(ts || Date.now());
+            return d.toLocaleString();
+        }
+        function toggleHistory(id) {
+            const el = document.getElementById('hist_' + id);
+            if (!el) return;
+            el.style.display = el.style.display === 'none' ? 'block' : 'none';
+        }
+        function useHistoryPrompt(enc) {
+            const p = decodeURIComponent(enc || '');
+            const input = document.getElementById('aiInput');
+            input.value = p;
+            aiAskFromInput();
+        }
+        function clearAIHistory() {
+            localStorage.removeItem('ai_history');
+            renderAIHistory();
+        }
+        function addHistoryEntry(entry) {
+            const hist = loadAIHistory();
+            hist.push({
+                id: entry.id || (Date.now() + Math.random().toString(36).slice(2)),
+                ts: entry.ts || Date.now(),
+                prompt: entry.prompt || '',
+                mode: entry.mode || 'get',
+                output: entry.output || '',
+                actions: Array.isArray(entry.actions) ? entry.actions : []
+            });
+            saveAIHistory(hist);
+            renderAIHistory();
+        }
+        function renderAIHistory() {
+            const cont = document.getElementById('aiHistory');
+            if (!cont) return;
+            const hist = loadAIHistory();
+            if (!hist.length) {
+                cont.innerHTML = '<div class="empty-state">No history yet</div>';
+                return;
+            }
+            let html = '';
+            const esc = (s) => (s || '').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;');
+            hist.slice().reverse().forEach((h, idx) => {
+                const actionsCount = Array.isArray(h.actions) ? h.actions.length : 0;
+                const id = h.id || (h.ts + '_' + idx);
+                html += `<div class="history-item">
+                    <div class="history-meta"><strong>${esc(formatTs(h.ts))}</strong> • ${esc(h.mode || 'get')} • ${actionsCount} action(s)</div>
+                    <div style="margin-top:6px;">${esc(h.prompt || '')}</div>
+                    <div style="margin-top:8px;">
+                        <button class="btn btn-secondary" onclick="toggleHistory('${id}')">View</button>
+                        <button class="btn" style="margin-left:8px;" onclick="useHistoryPrompt('${encodeURIComponent(h.prompt || '')}')">Ask Again</button>
+                    </div>
+                    <div id="hist_${id}" style="display:none; margin-top:8px;" class="ai-output">${esc(h.output || '')}${actionsCount ? `<div style='margin-top:8px;'>${renderActions(h.actions)}</div>` : ''}</div>
+                </div>`;
+            });
+            cont.innerHTML = html;
+        }
+
+        async function logServerHistoryEntry(entry) {
+            try {
+                await fetch(`${API_URL}/ai/history/log`, {
+                    method: 'POST',
+                    headers: buildHeaders(),
+                    body: JSON.stringify(entry)
+                });
+            } catch (e) {}
+        }
+
+        function getServerHistoryQuery() {
+            const params = new URLSearchParams();
+            const uid = document.getElementById('srvUserId').value.trim();
+            const mode = document.getElementById('srvMode').value;
+            const ws = document.getElementById('srvWorkspace').value.trim();
+            const pj = document.getElementById('srvProject').value.trim();
+            const at = document.getElementById('srvActionType').value.trim();
+            const st = document.getElementById('srvStart').value;
+            const en = document.getElementById('srvEnd').value;
+            const limit = document.getElementById('srvLimit').value || '50';
+            if (uid) params.set('user_id', uid);
+            if (mode) params.set('mode', mode);
+            if (ws) params.set('workspace_gid', ws);
+            if (pj) params.set('project_gid', pj);
+            if (at) params.set('action_type', at);
+            if (st) params.set('start', new Date(st).toISOString());
+            if (en) params.set('end', new Date(en).toISOString());
+            if (limit) params.set('limit', limit);
+            return params.toString();
+        }
+
+        function renderServerHistoryItems(items) {
+            if (!Array.isArray(items) || items.length === 0) return '<div class="empty-state">No server history</div>';
+            const esc = (s) => (s || '').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;');
+            return items.map((it, i) => {
+                const id = (it.id || i) + '_srv';
+                const actionsCount = Array.isArray(it.actions) ? it.actions.length : 0;
+                return `<div class="history-item">
+                    <div class="history-meta"><strong>${esc(it.created_at || '')}</strong> • ${esc(it.user_id || '')} • ${esc(it.mode || '')} • ${actionsCount} action(s)</div>
+                    <div style="margin-top:6px;">${esc(it.prompt || '')}</div>
+                    <div style="margin-top:8px;"><button class="btn btn-secondary" onclick="toggleHistory('${id}')">View</button></div>
+                    <div id="hist_${id}" style="display:none; margin-top:8px;" class="ai-output">${esc(it.output || '')}${actionsCount ? `<div style='margin-top:8px;'>${renderActions(it.actions)}</div>` : ''}</div>
+                </div>`;
+            }).join('');
+        }
+
+        async function loadServerHistory() {
+            const cont = document.getElementById('serverHistoryContent');
+            cont.innerHTML = '<div class="loading">⏳ Loading server history...</div>';
+            try {
+                const qs = getServerHistoryQuery();
+                const resp = await fetch(`${API_URL}/ai/history/list?${qs}`, { headers: buildHeaders() });
+                const data = await resp.json();
+                if (data.success) {
+                    cont.innerHTML = `<div class=\"success\">${data.count} total</div>` + renderServerHistoryItems(data.items);
+                } else {
+                    cont.innerHTML = `<div class=\"error\">❌ ${data.error || 'Error'}</div>`;
+                }
+            } catch (e) {
+                cont.innerHTML = `<div class=\"error\">❌ ${e.message}</div>`;
+            }
+        }
+
+        async function exportServerHistory(format) {
+            const qs = getServerHistoryQuery();
+            try {
+                const resp = await fetch(`${API_URL}/ai/history/export?format=${encodeURIComponent(format)}&${qs}`, { headers: buildHeaders() });
+                if (!resp.ok) {
+                    const t = await resp.text();
+                    alert(t);
+                    return;
+                }
+                if (format === 'csv') {
+                    const blob = await resp.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'ai_history.csv';
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                } else {
+                    const data = await resp.json();
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'ai_history.json';
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                }
+            } catch (e) {
+                alert(e.message);
+            }
+        }
+
+        async function purgeServerHistory() {
+            const cont = document.getElementById('serverHistoryContent');
+            const days = Number(document.getElementById('srvRetentionDays').value || '0');
+            const adminKey = loadAdminKey();
+            if (!adminKey) {
+                cont.innerHTML = '<div class="error">❌ Admin Key missing in Configuration</div>';
+                return;
+            }
+            if (!days || days <= 0) {
+                cont.innerHTML = '<div class="error">❌ Enter retention days</div>';
+                return;
+            }
+            cont.innerHTML = '<div class="loading">⏳ Purging...</div>';
+            try {
+                const headers = buildHeaders();
+                headers['x-admin-key'] = adminKey;
+                const resp = await fetch(`${API_URL}/ai/history/purge`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({ retention_days: days })
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    cont.innerHTML = '<div class="success">✅ Purge completed</div>';
+                } else {
+                    cont.innerHTML = `<div class=\"error\">❌ ${data.error || 'Error'}</div>`;
+                }
+            } catch (e) {
+                cont.innerHTML = `<div class=\"error\">❌ ${e.message}</div>`;
+            }
         }
 
         async function executeActions() {
@@ -802,6 +1103,8 @@
                     } else {
                         out.innerHTML = `<div class=\"ai-output\">${data.output || ''}</div>`;
                     }
+                    addHistoryEntry({ prompt, mode: data.mode, output: data.output, actions: data.actions || [] });
+                    logServerHistoryEntry({ prompt, mode: data.mode, output: data.output, actions: data.actions || [] });
                 } else {
                     out.innerHTML = `<div class=\"error\">❌ ${data.error || 'AI error'}</div>`;
                 }

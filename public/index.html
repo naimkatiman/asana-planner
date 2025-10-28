@@ -899,6 +899,46 @@
                 return `<div class="action-item">${idx + 1}. Unsupported action: <code>${a.type}</code></div>`;
             }).join('');
         }
+        function renderActionsEditable(actions) {
+            const arr = Array.isArray(actions) ? actions : [];
+            return arr.map((a, idx) => {
+                const val = (() => { try { return JSON.stringify(a || {}, null, 2); } catch { return '{}'; } })();
+                return `<div class="action-item action-edit" data-index="${idx}">
+                    <div style="font-weight:600; margin-bottom:6px;">Action ${idx + 1}</div>
+                    <textarea class="ae-json" style="width:100%; height:150px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;">${val}</textarea>
+                    <div style="margin-top:6px; text-align:right;"><button type="button" class="btn btn-secondary" onclick="removeActionEditor(this)">Remove</button></div>
+                </div>`;
+            }).join('');
+        }
+        function addActionEditor() {
+            const box = document.getElementById('confirmText');
+            if (!box) return;
+            const html = `<div class="action-item action-edit" data-index="new">
+                <div style="font-weight:600; margin-bottom:6px;">Action</div>
+                <textarea class="ae-json" style="width:100%; height:150px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;">${JSON.stringify({ type: 'update_task', task_gid: '', fields: {} }, null, 2)}</textarea>
+                <div style="margin-top:6px; text-align:right;"><button type="button" class="btn btn-secondary" onclick="removeActionEditor(this)">Remove</button></div>
+            </div>`;
+            box.insertAdjacentHTML('beforeend', html);
+        }
+        function removeActionEditor(btn) {
+            const el = btn && btn.closest && btn.closest('.action-edit');
+            if (el && el.parentNode) el.parentNode.removeChild(el);
+        }
+        function getEditedActionsFromModal() {
+            const edits = Array.from(document.querySelectorAll('#confirmText .action-edit .ae-json'));
+            const actions = [];
+            for (let i = 0; i < edits.length; i++) {
+                const t = edits[i].value || '';
+                try {
+                    const obj = JSON.parse(t);
+                    if (obj && obj.type) actions.push(obj);
+                } catch (e) {
+                    alert('Invalid JSON in action #' + (i + 1));
+                    return null;
+                }
+            }
+            return actions;
+        }
         function renderMarkdown(md) {
             md = (md || '').toString();
             const escapeHtml = (s) => (s || '').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -949,7 +989,7 @@
         function openConfirm(actions, note) {
             pendingActions = actions || [];
             const text = document.getElementById('confirmText');
-            text.innerHTML = `${note ? `<div style='margin-bottom:10px;'>${note}</div>` : ''}` + renderActions(pendingActions);
+            text.innerHTML = `${note ? `<div style='margin-bottom:10px;'>${note}</div>` : ''}` + renderActionsEditable(pendingActions) + `<div style="margin-top:8px;"><button type="button" class="btn" onclick="addActionEditor()">Add Action</button></div>`;
             document.getElementById('confirmModal').classList.add('show');
         }
 
@@ -1164,10 +1204,12 @@
             const out = document.getElementById('aiOutput');
             out.innerHTML = '<div class="loading">⏳ Executing actions...</div>';
             try {
+                const edited = getEditedActionsFromModal();
+                if (!edited) { out.innerHTML = '<div class="error">❌ Fix invalid action JSON</div>'; return; }
                 const resp = await fetch(`${API_URL}/ai/execute`, {
                     method: 'POST',
                     headers: buildHeaders(),
-                    body: JSON.stringify({ actions: pendingActions })
+                    body: JSON.stringify({ actions: edited })
                 });
                 const data = await resp.json();
                 if (data.success) {

@@ -2,6 +2,7 @@ const express = require('express');
 const asana = require('asana');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+const axios = require('axios');
 
 const app = express();
 const PORT = 3000;
@@ -20,6 +21,22 @@ let credentials = {
 };
 
 // API Endpoints
+
+function tryParseJson(text) {
+    if (!text || typeof text !== 'string') return null;
+    try { return JSON.parse(text); } catch {}
+    const fence = text.match(/```(?:json)?\n([\s\S]*?)```/i);
+    if (fence) { try { return JSON.parse(fence[1]); } catch {} }
+    const brace = text.indexOf('{');
+    if (brace >= 0) {
+        const last = text.lastIndexOf('}');
+        if (last > brace) {
+            const slice = text.slice(brace, last + 1);
+            try { return JSON.parse(slice); } catch {}
+        }
+    }
+    return null;
+}
 
 // Save credentials
 app.post('/api/credentials', (req, res) => {
@@ -80,6 +97,138 @@ app.get('/api/tasks', async (req, res) => {
             details: error.message,
             hint: 'Check if your credentials are correct and have proper permissions'
         });
+    }
+});
+
+app.post('/api/ai/query', async (req, res) => {
+    try {
+        const prompt = (req.body && req.body.prompt) || '';
+        if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
+        const openrouterKey = req.headers['x-openrouter-key'] || req.headers['X-OpenRouter-Key'] || req.headers['x-openrouter-key'];
+        if (!openrouterKey) return res.status(400).json({ error: 'Please provide OpenRouter API key in x-openrouter-key header' });
+
+        let tasks = [];
+        if (credentials.token) {
+            try {
+                const client = asana.Client.create().useAccessToken(credentials.token);
+                if (credentials.projectGid) {
+                    const projectTasks = await client.tasks.getTasksForProject(credentials.projectGid, {
+                        opt_fields: 'name,completed,due_on,due_at,assignee,assignee.name,tags,tags.name,notes,created_at,modified_at,priority,completed_at'
+                    });
+                    tasks = await projectTasks.collect();
+                } else if (credentials.userGid && credentials.workspaceGid) {
+                    const userTasks = await client.tasks.getTasksForUser(credentials.userGid, {
+                        workspace: credentials.workspaceGid,
+                        opt_fields: 'name,completed,due_on,due_at,assignee,assignee.name,tags,tags.name,notes,created_at,modified_at,priority,completed_at'
+                    });
+                    tasks = await userTasks.collect();
+                } else if (credentials.workspaceGid) {
+                    const workspaceTasks = await client.tasks.searchTasksForWorkspace(credentials.workspaceGid, {
+                        opt_fields: 'name,completed,due_on,due_at,assignee,assignee.name,tags,tags.name,notes,created_at,modified_at,priority,completed_at'
+                    });
+                    tasks = await workspaceTasks.collect();
+                }
+            } catch {}
+        }
+
+        const tasksBrief = (tasks || []).slice(0, 200).map((t) => ({
+            gid: t.gid,
+            name: t.name,
+            completed: !!t.completed,
+            due_on: t.due_on || null,
+            assignee: t.assignee && t.assignee.name ? t.assignee.name : null,
+            tags: Array.isArray(t.tags) ? t.tags.map((x) => x && x.name).filter(Boolean) : [],
+            priority: t.priority || null,
+        }));
+
+        const messages = [
+            {
+                role: 'system',
+                content: 'You are an assistant for Asana task planning. Always respond with a single JSON object. Keys: mode ("get" or "post"), output (string), actions (optional array). Use mode="get" for informational queries. Use mode="post" only when the user asks to create, update, or edit. When using mode="post", propose actions only and do not assume execution. Allowed actions: {type:"update_task", task_gid, fields:{...}} | {type:"create_subtask", parent_task_gid, fields:{name, due_on?, assignee?, notes?}} | {type:"comment_task", task_gid, text}. Keep output concise and actionable.'
+            },
+            {
+                role: 'user',
+                content: `${prompt}\n\nContext JSON:\n${JSON.stringify({ tasks: tasksBrief })}`
+            }
+        ];
+
+        const resp = await axios.post(
+            'https://openrouter.ai/api/v1/chat/completions',
+            {
+                model: 'google/gemini-2.5-flash',
+                messages,
+                temperature: 0.2,
+                max_tokens: 1200,
+            },
+            {
+                headers: {
+                    Authorization: `Bearer ${openrouterKey}`,
+                    'HTTP-Referer': 'http://localhost',
+                    'X-Title': 'Asana Planner Agent',
+                },
+                timeout: 60000,
+            }
+        );
+
+        const content = resp && resp.data && resp.data.choices && resp.data.choices[0] && resp.data.choices[0].message && resp.data.choices[0].message.content
+            ? resp.data.choices[0].message.content
+            : '';
+        const parsed = tryParseJson(content);
+        if (parsed && (parsed.mode === 'get' || parsed.mode === 'post')) {
+            return res.json({
+                success: true,
+                mode: parsed.mode,
+                output: typeof parsed.output === 'string' ? parsed.output : String(parsed.output || ''),
+                actions: Array.isArray(parsed.actions) ? parsed.actions : [],
+                raw: content,
+            });
+        }
+        return res.json({ success: true, mode: 'get', output: content || '', actions: [] });
+    } catch (error) {
+        console.error('AI query error:', error);
+        res.status(500).json({ error: 'AI request failed', details: error.message });
+    }
+});
+
+app.post('/api/ai/execute', async (req, res) => {
+    try {
+        if (!credentials.token) return res.status(400).json({ error: 'Please configure credentials first' });
+        const actions = Array.isArray(req.body && req.body.actions) ? req.body.actions : [];
+        if (!actions.length) return res.status(400).json({ error: 'No actions to execute' });
+
+        const http = axios.create({
+            baseURL: 'https://app.asana.com/api/1.0',
+            headers: { Authorization: `Bearer ${credentials.token}` },
+        });
+
+        const results = [];
+        for (let i = 0; i < actions.length; i++) {
+            const a = actions[i] || {};
+            try {
+                if (a.type === 'update_task' && a.task_gid) {
+                    const r = await http.put(`/tasks/${a.task_gid}`, { data: a.fields || {} });
+                    results.push({ index: i, type: a.type, ok: true, gid: a.task_gid, data: r.data && r.data.data });
+                    continue;
+                }
+                if (a.type === 'create_subtask' && a.parent_task_gid) {
+                    const r = await http.post(`/tasks/${a.parent_task_gid}/subtasks`, { data: a.fields || {} });
+                    results.push({ index: i, type: a.type, ok: true, parent: a.parent_task_gid, data: r.data && r.data.data });
+                    continue;
+                }
+                if (a.type === 'comment_task' && a.task_gid && a.text) {
+                    const r = await http.post(`/tasks/${a.task_gid}/stories`, { data: { text: a.text } });
+                    results.push({ index: i, type: a.type, ok: true, gid: a.task_gid, data: r.data && r.data.data });
+                    continue;
+                }
+                results.push({ index: i, type: a.type, ok: false, error: 'Unsupported or invalid action' });
+            } catch (e) {
+                results.push({ index: i, type: a.type, ok: false, error: e.message });
+            }
+        }
+        res.json({ success: true, results });
+    } catch (error) {
+        console.error('Execute actions error:', error);
+        res.status(500).json({ error: 'Failed to execute actions', details: error.message });
     }
 });
 

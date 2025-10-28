@@ -299,6 +299,38 @@
                 grid-template-columns: repeat(2, 1fr);
             }
         }
+        .ai-output {
+            white-space: pre-wrap;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+        .modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        .modal.show { display: flex; }
+        .modal-content {
+            background: #fff;
+            border-radius: 10px;
+            padding: 20px;
+            max-width: 700px;
+            width: 92%;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .action-item {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 6px;
+            margin: 6px 0;
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
@@ -316,6 +348,11 @@
                     <label for="token">Personal Access Token *</label>
                     <input type="password" id="token" placeholder="Enter your Asana Personal Access Token" required>
                     <small>Get your token from: <a href="https://app.asana.com/0/my-apps" target="_blank">Asana Developer Console</a></small>
+                </div>
+                <div class="form-group">
+                    <label for="openrouterKey">OpenRouter API Key</label>
+                    <input type="password" id="openrouterKey" placeholder="Enter your OpenRouter API Key">
+                    <small>Required for AI features (model: google/gemini-2.5-flash)</small>
                 </div>
                 <div class="form-group">
                     <label for="workspaceGid">Workspace GID (Optional)</label>
@@ -345,6 +382,7 @@
                 <button class="tab active" onclick="switchTab('tasks')">📝 Tasks</button>
                 <button class="tab" onclick="switchTab('planning')">📅 Planning</button>
                 <button class="tab" onclick="switchTab('brainstorm')">💡 Brainstorm</button>
+                <button class="tab" onclick="switchTab('ai')">🤖 AI Agent</button>
             </div>
 
             <!-- Tasks Tab -->
@@ -364,11 +402,41 @@
                 <button class="btn btn-secondary" onclick="runBrainstorm()">🧠 Analyze & Get Insights</button>
                 <div id="brainstormContent"></div>
             </div>
+
+            <div id="aiTab" class="tab-content">
+                <div style="margin-bottom:10px;">
+                    <button class="btn btn-secondary" onclick="aiQuick('Summarize all tasks with deadlines this week')">Summarize all tasks with deadlines this week</button>
+                    <button class="btn btn-secondary" onclick="aiQuick('What should I prioritize next based on Asana data?')">What should I prioritize next based on Asana data?</button>
+                    <button class="btn btn-secondary" onclick="aiQuick('Show pending payment or finance-related tasks')">Show pending payment or finance-related tasks</button>
+                    <button class="btn btn-secondary" onclick="aiQuick('Show overdue items and their impact')">Show overdue items and their impact</button>
+                    <button class="btn btn-secondary" onclick="aiQuick('Generate a summary report for management')">Generate a summary report for management</button>
+                    <button class="btn btn-secondary" onclick="aiQuick('Suggest subtasks for incomplete projects')">Suggest subtasks for incomplete projects</button>
+                    <button class="btn btn-secondary" onclick="aiQuick('Where can our workflow be improved?')">Where can our workflow be improved?</button>
+                    <button class="btn btn-secondary" onclick="aiQuick('Highlight auditor queries and compliance tasks')">Highlight auditor queries and compliance tasks</button>
+                </div>
+                <div class="form-group">
+                    <input type="text" id="aiInput" placeholder="Ask the Asana AI agent...">
+                </div>
+                <button class="btn" onclick="aiAskFromInput()">Ask AI</button>
+                <div id="aiOutput" class="ai-output"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="confirmModal" class="modal">
+        <div class="modal-content">
+            <h2 style="margin-bottom:10px;">Confirm AI Actions</h2>
+            <div id="confirmText" style="margin-top:10px;"></div>
+            <div style="margin-top:15px; text-align:right;">
+                <button class="btn btn-secondary" onclick="closeConfirm()">Cancel</button>
+                <button class="btn btn-success" onclick="executeActions()">Confirm</button>
+            </div>
         </div>
     </div>
 
   <script>
         const API_URL = window.location.origin + '/api';
+        let pendingActions = [];
 
         function loadCredsFromStorage() {
             return {
@@ -385,6 +453,12 @@
             localStorage.setItem('asana_project_gid', creds.projectGid || '');
             localStorage.setItem('asana_user_gid', creds.userGid || '');
         }
+        function loadAIKey() {
+            return localStorage.getItem('openrouter_key') || '';
+        }
+        function saveAIKey(key) {
+            localStorage.setItem('openrouter_key', key || '');
+        }
 
         function buildHeaders() {
             const creds = loadCredsFromStorage();
@@ -393,6 +467,8 @@
             if (creds.workspaceGid) headers['x-workspace-gid'] = creds.workspaceGid;
             if (creds.projectGid) headers['x-project-gid'] = creds.projectGid;
             if (creds.userGid) headers['x-user-gid'] = creds.userGid;
+            const aiKey = loadAIKey();
+            if (aiKey) headers['x-openrouter-key'] = aiKey;
             return headers;
         }
 
@@ -411,6 +487,7 @@
         function prefillFormFromStorage() {
             const creds = loadCredsFromStorage();
             document.getElementById('token').value = creds.token;
+            document.getElementById('openrouterKey').value = loadAIKey();
             document.getElementById('workspaceGid').value = creds.workspaceGid;
             document.getElementById('projectGid').value = creds.projectGid;
             document.getElementById('userGid').value = creds.userGid;
@@ -435,12 +512,14 @@
             
             const credentials = {
                 token: document.getElementById('token').value,
+                openrouterKey: document.getElementById('openrouterKey').value,
                 workspaceGid: document.getElementById('workspaceGid').value,
                 projectGid: document.getElementById('projectGid').value,
                 userGid: document.getElementById('userGid').value
             };
 
             saveCredsToStorage(credentials);
+            saveAIKey(credentials.openrouterKey);
             const msgDiv = document.getElementById('credentialsMessage');
             msgDiv.innerHTML = '<div class="success">✅ Credentials saved locally!</div>';
             updateConfigStatus();
@@ -634,6 +713,100 @@
                 }
             } catch (error) {
                 contentDiv.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+            }
+        }
+
+        function aiQuick(text) {
+            document.getElementById('aiInput').value = text;
+            aiAsk(text);
+        }
+
+        function renderActions(actions) {
+            if (!Array.isArray(actions) || actions.length === 0) return '';
+            return actions.map((a, idx) => {
+                if (!a || !a.type) return `<div class="action-item">${idx + 1}. Unsupported action</div>`;
+                if (a.type === 'update_task') {
+                    return `<div class="action-item">${idx + 1}. Update task <code>${a.task_gid}</code> with ${a.fields ? `<code>${JSON.stringify(a.fields)}</code>` : 'no fields'}</div>`;
+                }
+                if (a.type === 'create_subtask') {
+                    return `<div class="action-item">${idx + 1}. Create subtask under <code>${a.parent_task_gid}</code> with ${a.fields ? `<code>${JSON.stringify(a.fields)}</code>` : 'no fields'}</div>`;
+                }
+                if (a.type === 'comment_task') {
+                    return `<div class="action-item">${idx + 1}. Comment on task <code>${a.task_gid}</code> with text: <code>${(a.text || '').toString().slice(0,200)}</code></div>`;
+                }
+                return `<div class="action-item">${idx + 1}. Unsupported action: <code>${a.type}</code></div>`;
+            }).join('');
+        }
+
+        function openConfirm(actions, note) {
+            pendingActions = actions || [];
+            const text = document.getElementById('confirmText');
+            text.innerHTML = `${note ? `<div style='margin-bottom:10px;'>${note}</div>` : ''}` + renderActions(pendingActions);
+            document.getElementById('confirmModal').classList.add('show');
+        }
+
+        function closeConfirm() {
+            pendingActions = [];
+            document.getElementById('confirmModal').classList.remove('show');
+        }
+
+        async function executeActions() {
+            const out = document.getElementById('aiOutput');
+            out.innerHTML = '<div class="loading">⏳ Executing actions...</div>';
+            try {
+                const resp = await fetch(`${API_URL}/ai/execute`, {
+                    method: 'POST',
+                    headers: buildHeaders(),
+                    body: JSON.stringify({ actions: pendingActions })
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    const rows = (data.results || []).map(r => `• [${r.ok ? 'OK' : 'ERR'}] ${r.type}${r.gid ? ' ' + r.gid : ''}${r.parent ? ' parent:' + r.parent : ''}${r.error ? ' - ' + r.error : ''}`).join('\n');
+                    out.innerHTML = `<div class="success">✅ Executed ${data.results.length} action(s)</div><div class="ai-output">${rows || 'No results'}</div>`;
+                } else {
+                    out.innerHTML = `<div class=\"error\">❌ ${data.error || 'Execution failed'}</div>`;
+                }
+            } catch (e) {
+                out.innerHTML = `<div class=\"error\">❌ ${e.message}</div>`;
+            } finally {
+                closeConfirm();
+            }
+        }
+
+        async function aiAskFromInput() {
+            const input = document.getElementById('aiInput');
+            const q = (input.value || '').trim();
+            if (!q) return;
+            await aiAsk(q);
+        }
+
+        async function aiAsk(prompt) {
+            const out = document.getElementById('aiOutput');
+            const aiKey = loadAIKey();
+            if (!aiKey) {
+                out.innerHTML = '<div class="error">❌ Please enter your OpenRouter API key in Configuration</div>';
+                return;
+            }
+            out.innerHTML = '<div class="loading">⏳ Asking AI...</div>';
+            try {
+                const resp = await fetch(`${API_URL}/ai/query`, {
+                    method: 'POST',
+                    headers: buildHeaders(),
+                    body: JSON.stringify({ prompt })
+                });
+                const data = await resp.json();
+                if (data.success) {
+                    if (data.mode === 'post' && (data.actions || []).length > 0) {
+                        out.innerHTML = `<div class=\"success\">Proposed changes detected. Please confirm.</div><div class=\"ai-output\">${data.output || ''}</div>`;
+                        openConfirm(data.actions, 'The AI suggests the following changes:');
+                    } else {
+                        out.innerHTML = `<div class=\"ai-output\">${data.output || ''}</div>`;
+                    }
+                } else {
+                    out.innerHTML = `<div class=\"error\">❌ ${data.error || 'AI error'}</div>`;
+                }
+            } catch (e) {
+                out.innerHTML = `<div class=\"error\">❌ ${e.message}</div>`;
             }
         }
   </script>

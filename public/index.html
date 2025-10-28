@@ -169,6 +169,27 @@
         .tab-content.active {
             display: block;
         }
+        /* Sub-tabs for AI section */
+        .sub-tabs {
+            display: flex;
+            border-bottom: 1px solid #e1e8ed;
+            margin-bottom: 12px;
+            gap: 8px;
+        }
+        .sub-tab {
+            padding: 8px 14px;
+            background: none;
+            border: none;
+            color: #666;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+        }
+        .sub-tab.active { color: #667eea; border-bottom-color: #667eea; }
+        .sub-content { display: none; }
+        .sub-content.active { display: block; }
 
         .task-item {
             background: #f8f9fa;
@@ -302,10 +323,25 @@
         .ai-output {
             white-space: pre-wrap;
             background: #f8f9fa;
-            padding: 15px;
-            border-radius: 8px;
+            padding: 16px 18px;
+            border-radius: 10px;
             margin-top: 10px;
+            line-height: 1.6;
+            color: #2c2c2c;
         }
+        .ai-output h2, .ai-output h3, .ai-output h4 {
+            margin: 8px 0 6px;
+            color: #333;
+        }
+        .ai-output ul, .ai-output ol {
+            margin: 8px 0 8px 20px;
+            padding-left: 18px;
+        }
+        .ai-output li { margin: 4px 0; }
+        .ai-output strong { font-weight: 700; color: #111; }
+        .ai-output em { font-style: italic; color: #444; }
+        .ai-output code { background: #eef2ff; padding: 2px 6px; border-radius: 4px; }
+        .ai-output pre { background: #0b1022; color: #e5e7eb; padding: 12px; border-radius: 8px; overflow: auto; }
         .modal {
             position: fixed;
             inset: 0;
@@ -351,63 +387,20 @@
             <p>Automate your Asana workflow with intelligent planning and brainstorming</p>
         </div>
 
-        <!-- Configuration Card -->
-        <div class="card">
-            <h2>⚙️ Configuration <span id="configStatus" class="status-badge status-not-configured">Not Configured</span></h2>
-            <form id="credentialsForm">
-                <div class="form-group">
-                    <label for="token">Personal Access Token *</label>
-                    <input type="password" id="token" placeholder="Enter your Asana Personal Access Token" required>
-                    <small>Get your token from: <a href="https://app.asana.com/0/my-apps" target="_blank">Asana Developer Console</a></small>
-                </div>
-                <div class="form-group">
-                    <label for="openrouterKey">OpenRouter API Key</label>
-                    <input type="password" id="openrouterKey" placeholder="Enter your OpenRouter API Key">
-                    <small>Required for AI features (model: google/gemini-2.5-flash)</small>
-                </div>
-                <div class="form-group">
-                    <label for="userId">User ID</label>
-                    <input type="text" id="userId" placeholder="e.g., email or username">
-                    <small>Used to attribute AI history entries</small>
-                </div>
-                <div class="form-group">
-                    <label for="adminKey">Admin Key</label>
-                    <input type="password" id="adminKey" placeholder="Optional, for admin operations like purge">
-                    <small>Only needed for purge; stored locally</small>
-                </div>
-                <div class="form-group">
-                    <label for="workspaceGid">Workspace GID (Optional)</label>
-                    <input type="text" id="workspaceGid" placeholder="e.g., 1234567890123456">
-                    <small>Leave empty to fetch all workspaces after saving token</small>
-                </div>
-                <div class="form-group">
-                    <label for="projectGid">Project GID (Optional)</label>
-                    <input type="text" id="projectGid" placeholder="e.g., 1234567890123456">
-                    <small>Filter tasks by specific project</small>
-                </div>
-                <div class="form-group">
-                    <label for="userGid">User GID (Optional)</label>
-                    <input type="text" id="userGid" placeholder="e.g., 1234567890123456">
-                    <small>Filter tasks by specific user/assignee</small>
-                </div>
-                <button type="submit" class="btn">💾 Save Credentials</button>
-                <button type="button" class="btn btn-secondary" onclick="fetchWorkspaces()">📋 Fetch Workspaces</button>
-                <button type="button" class="btn btn-secondary" onclick="fetchProjects()">📁 Fetch Projects</button>
-            </form>
-            <div id="credentialsMessage"></div>
-        </div>
+        <!-- Configuration moved into top-level Config tab below -->
 
         <!-- Main Dashboard -->
         <div class="card">
             <div class="tabs">
-                <button class="tab active" onclick="switchTab('tasks')">📝 Tasks</button>
+                <button class="tab active" onclick="switchTab('ai')">🤖 AI Agent</button>
+                <button class="tab" onclick="switchTab('tasks')">📝 Tasks</button>
                 <button class="tab" onclick="switchTab('planning')">📅 Planning</button>
                 <button class="tab" onclick="switchTab('brainstorm')">💡 Brainstorm</button>
-                <button class="tab" onclick="switchTab('ai')">🤖 AI Agent</button>
+                <button class="tab" onclick="switchTab('config')">⚙️ Configuration</button>
             </div>
 
             <!-- Tasks Tab -->
-            <div id="tasksTab" class="tab-content active">
+            <div id="tasksTab" class="tab-content">
                 <button class="btn" onclick="fetchTasks()">🔄 Fetch Tasks</button>
                 <div id="tasksContent"></div>
             </div>
@@ -424,51 +417,107 @@
                 <div id="brainstormContent"></div>
             </div>
 
-            <div id="aiTab" class="tab-content">
-                <div style="margin-bottom:10px;">
-                    <button class="btn btn-secondary" onclick="aiQuick('Summarize all tasks with deadlines this week')">Summarize all tasks with deadlines this week</button>
-                    <button class="btn btn-secondary" onclick="aiQuick('What should I prioritize next based on Asana data?')">What should I prioritize next based on Asana data?</button>
-                    <button class="btn btn-secondary" onclick="aiQuick('Show pending payment or finance-related tasks')">Show pending payment or finance-related tasks</button>
-                    <button class="btn btn-secondary" onclick="aiQuick('Show overdue items and their impact')">Show overdue items and their impact</button>
-                    <button class="btn btn-secondary" onclick="aiQuick('Generate a summary report for management')">Generate a summary report for management</button>
-                    <button class="btn btn-secondary" onclick="aiQuick('Suggest subtasks for incomplete projects')">Suggest subtasks for incomplete projects</button>
-                    <button class="btn btn-secondary" onclick="aiQuick('Where can our workflow be improved?')">Where can our workflow be improved?</button>
-                    <button class="btn btn-secondary" onclick="aiQuick('Highlight auditor queries and compliance tasks')">Highlight auditor queries and compliance tasks</button>
+            <div id="aiTab" class="tab-content active">
+                <div class="sub-tabs">
+                    <button class="sub-tab active" onclick="switchAITab('chat', this)">Chat</button>
+                    <button class="sub-tab" onclick="switchAITab('history', this)">History</button>
+                    <button class="sub-tab" onclick="switchAITab('server', this)">Server History</button>
                 </div>
-                <div class="form-group">
-                    <input type="text" id="aiInput" placeholder="Ask the Asana AI agent...">
+                <div id="aiSubChat" class="sub-content active">
+                    <div style="margin-bottom:10px;">
+                        <button class="btn btn-secondary" onclick="aiQuick('Summarize all tasks with deadlines this week')">Summarize all tasks with deadlines this week</button>
+                        <button class="btn btn-secondary" onclick="aiQuick('What should I prioritize next based on Asana data?')">What should I prioritize next based on Asana data?</button>
+                        <button class="btn btn-secondary" onclick="aiQuick('Show pending payment or finance-related tasks')">Show pending payment or finance-related tasks</button>
+                        <button class="btn btn-secondary" onclick="aiQuick('Show overdue items and their impact')">Show overdue items and their impact</button>
+                        <button class="btn btn-secondary" onclick="aiQuick('Generate a summary report for management')">Generate a summary report for management</button>
+                        <button class="btn btn-secondary" onclick="aiQuick('Suggest subtasks for incomplete projects')">Suggest subtasks for incomplete projects</button>
+                        <button class="btn btn-secondary" onclick="aiQuick('Where can our workflow be improved?')">Where can our workflow be improved?</button>
+                        <button class="btn btn-secondary" onclick="aiQuick('Highlight auditor queries and compliance tasks')">Highlight auditor queries and compliance tasks</button>
+                    </div>
+                    <div class="form-group">
+                        <input type="text" id="aiInput" placeholder="Ask the Asana AI agent...">
+                    </div>
+                    <button class="btn" onclick="aiAskFromInput()">Ask AI</button>
+                    <div id="aiOutput" class="ai-output"></div>
                 </div>
-                <button class="btn" onclick="aiAskFromInput()">Ask AI</button>
-                <div id="aiOutput" class="ai-output"></div>
-                <div style="display:flex; align-items:center; justify-content:space-between; margin-top:20px;">
-                    <h3 style="color:#333;">AI History</h3>
-                    <button class="btn btn-secondary" onclick="clearAIHistory()">Clear History</button>
+                <div id="aiSubHistory" class="sub-content">
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+                        <h3 style="color:#333;">AI History</h3>
+                        <button class="btn btn-secondary" onclick="clearAIHistory()">Clear History</button>
+                    </div>
+                    <div id="aiHistory"></div>
                 </div>
-                <div id="aiHistory"></div>
-                <div style="display:flex; align-items:center; justify-content:space-between; margin-top:30px;">
-                    <h3 style="color:#333;">Server History</h3>
-                    <div></div>
+                <div id="aiSubServer" class="sub-content">
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+                        <h3 style="color:#333;">Server History</h3>
+                        <div></div>
+                    </div>
+                    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:10px; margin-bottom:10px;">
+                        <div class="form-group"><label>User ID</label><input type="text" id="srvUserId"></div>
+                        <div class="form-group"><label>Mode</label><select id="srvMode" style="width:100%; padding:12px; border:2px solid #e1e8ed; border-radius:8px;"><option value="">Any</option><option value="get">get</option><option value="post">post</option></select></div>
+                        <div class="form-group"><label>Workspace GID</label><input type="text" id="srvWorkspace"></div>
+                        <div class="form-group"><label>Project GID</label><input type="text" id="srvProject"></div>
+                        <div class="form-group"><label>Action Type</label><input type="text" id="srvActionType" placeholder="e.g., create_task"></div>
+                        <div class="form-group"><label>Start</label><input type="datetime-local" id="srvStart"></div>
+                        <div class="form-group"><label>End</label><input type="datetime-local" id="srvEnd"></div>
+                        <div class="form-group"><label>Limit</label><input type="number" id="srvLimit" value="50" min="1" max="500"></div>
+                    </div>
+                    <div style="margin-bottom:10px;">
+                        <button class="btn" onclick="loadServerHistory()">Load</button>
+                        <button class="btn btn-secondary" onclick="exportServerHistory('json')">Export JSON</button>
+                        <button class="btn btn-secondary" onclick="exportServerHistory('csv')">Export CSV</button>
+                    </div>
+                    <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
+                        <input type="number" id="srvRetentionDays" placeholder="Retention days" style="flex:0 0 200px; padding:12px; border:2px solid #e1e8ed; border-radius:8px;">
+                        <button class="btn btn-secondary" onclick="purgeServerHistory()">Purge</button>
+                    </div>
+                    <div id="serverHistoryContent"></div>
                 </div>
-                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:10px; margin-bottom:10px;">
-                    <div class="form-group"><label>User ID</label><input type="text" id="srvUserId"></div>
-                    <div class="form-group"><label>Mode</label><select id="srvMode" style="width:100%; padding:12px; border:2px solid #e1e8ed; border-radius:8px;"><option value="">Any</option><option value="get">get</option><option value="post">post</option></select></div>
-                    <div class="form-group"><label>Workspace GID</label><input type="text" id="srvWorkspace"></div>
-                    <div class="form-group"><label>Project GID</label><input type="text" id="srvProject"></div>
-                    <div class="form-group"><label>Action Type</label><input type="text" id="srvActionType" placeholder="e.g., create_task"></div>
-                    <div class="form-group"><label>Start</label><input type="datetime-local" id="srvStart"></div>
-                    <div class="form-group"><label>End</label><input type="datetime-local" id="srvEnd"></div>
-                    <div class="form-group"><label>Limit</label><input type="number" id="srvLimit" value="50" min="1" max="500"></div>
-                </div>
-                <div style="margin-bottom:10px;">
-                    <button class="btn" onclick="loadServerHistory()">Load</button>
-                    <button class="btn btn-secondary" onclick="exportServerHistory('json')">Export JSON</button>
-                    <button class="btn btn-secondary" onclick="exportServerHistory('csv')">Export CSV</button>
-                </div>
-                <div style="display:flex; gap:10px; align-items:center; margin-bottom:10px;">
-                    <input type="number" id="srvRetentionDays" placeholder="Retention days" style="flex:0 0 200px; padding:12px; border:2px solid #e1e8ed; border-radius:8px;">
-                    <button class="btn btn-secondary" onclick="purgeServerHistory()">Purge</button>
-                </div>
-                <div id="serverHistoryContent"></div>
+            </div>
+
+            <div id="configTab" class="tab-content">
+                <h2>⚙️ Configuration <span id="configStatus" class="status-badge status-not-configured">Not Configured</span></h2>
+                <form id="credentialsForm">
+                    <div class="form-group">
+                        <label for="token">Personal Access Token *</label>
+                        <input type="password" id="token" placeholder="Enter your Asana Personal Access Token" required>
+                        <small>Get your token from: <a href="https://app.asana.com/0/my-apps" target="_blank">Asana Developer Console</a></small>
+                    </div>
+                    <div class="form-group">
+                        <label for="openrouterKey">OpenRouter API Key</label>
+                        <input type="password" id="openrouterKey" placeholder="Enter your OpenRouter API Key">
+                        <small>Required for AI features (model: google/gemini-2.5-flash)</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="userId">User ID</label>
+                        <input type="text" id="userId" placeholder="e.g., email or username">
+                        <small>Used to attribute AI history entries</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="adminKey">Admin Key</label>
+                        <input type="password" id="adminKey" placeholder="Optional, for admin operations like purge">
+                        <small>Only needed for purge; stored locally</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="workspaceGid">Workspace GID (Optional)</label>
+                        <input type="text" id="workspaceGid" placeholder="e.g., 1234567890123456">
+                        <small>Leave empty to fetch all workspaces after saving token</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="projectGid">Project GID (Optional)</label>
+                        <input type="text" id="projectGid" placeholder="e.g., 1234567890123456">
+                        <small>Filter tasks by specific project</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="userGid">User GID (Optional)</label>
+                        <input type="text" id="userGid" placeholder="e.g., 1234567890123456">
+                        <small>Filter tasks by specific user/assignee</small>
+                    </div>
+                    <button type="submit" class="btn">💾 Save Credentials</button>
+                    <button type="button" class="btn btn-secondary" onclick="fetchWorkspaces()">📋 Fetch Workspaces</button>
+                    <button type="button" class="btn btn-secondary" onclick="fetchProjects()">📁 Fetch Projects</button>
+                </form>
+                <div id="credentialsMessage"></div>
             </div>
         </div>
     </div>
@@ -575,6 +624,18 @@
             // Show selected tab
             document.getElementById(tabName + 'Tab').classList.add('active');
             event.target.classList.add('active');
+        }
+
+        function switchAITab(sub, el) {
+            const root = document.getElementById('aiTab');
+            if (!root) return;
+            const ids = { chat: 'aiSubChat', history: 'aiSubHistory', server: 'aiSubServer' };
+            root.querySelectorAll('.sub-content').forEach(x => x.classList.remove('active'));
+            const targetId = ids[sub] || 'aiSubChat';
+            const target = document.getElementById(targetId);
+            if (target) target.classList.add('active');
+            root.querySelectorAll('.sub-tab').forEach(b => b.classList.remove('active'));
+            if (el && el.classList) el.classList.add('active');
         }
 
         document.getElementById('credentialsForm').addEventListener('submit', (e) => {
@@ -838,6 +899,52 @@
                 return `<div class="action-item">${idx + 1}. Unsupported action: <code>${a.type}</code></div>`;
             }).join('');
         }
+        function renderMarkdown(md) {
+            md = (md || '').toString();
+            const escapeHtml = (s) => (s || '').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            const blocks = [];
+            let text = md.replace(/```([\s\S]*?)```/g, function(_, p1){
+                const key = `§§CB${blocks.length}§§`;
+                blocks.push(`<pre><code>${escapeHtml(p1.trim())}</code></pre>`);
+                return key;
+            });
+            text = escapeHtml(text);
+            text = text.replace(/^### (.*)$/gm, '<h4>$1<\/h4>')
+                       .replace(/^## (.*)$/gm, '<h3>$1<\/h3>')
+                       .replace(/^# (.*)$/gm, '<h2>$1<\/h2>');
+            text = text.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1<\/strong>');
+            text = text.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2<\/em>');
+            const lines = text.split('\n');
+            let html = '', inUl = false, inOl = false;
+            for (let i = 0; i < lines.length; i++) {
+                const l = lines[i];
+                const mUl = l.match(/^\s*[-*]\s+(.*)/);
+                const mOl = l.match(/^\s*\d+\.\s+(.*)/);
+                if (mUl) {
+                    if (inOl) { html += '</ol>'; inOl = false; }
+                    if (!inUl) { html += '<ul>'; inUl = true; }
+                    html += `<li>${mUl[1]}</li>`;
+                } else if (mOl) {
+                    if (inUl) { html += '</ul>'; inUl = false; }
+                    if (!inOl) { html += '<ol>'; inOl = true; }
+                    html += `<li>${mOl[1]}</li>`;
+                } else {
+                    if (inUl) { html += '</ul>'; inUl = false; }
+                    if (inOl) { html += '</ol>'; inOl = false; }
+                    if (l.trim() === '') {
+                        html += '<br>';
+                    } else {
+                        html += `<p>${l}</p>`;
+                    }
+                }
+            }
+            if (inUl) html += '</ul>';
+            if (inOl) html += '</ol>';
+            for (let i = 0; i < blocks.length; i++) {
+                html = html.replaceAll(`§§CB${i}§§`, blocks[i]);
+            }
+            return html;
+        }
 
         function openConfirm(actions, note) {
             pendingActions = actions || [];
@@ -907,6 +1014,7 @@
             hist.slice().reverse().forEach((h, idx) => {
                 const actionsCount = Array.isArray(h.actions) ? h.actions.length : 0;
                 const id = h.id || (h.ts + '_' + idx);
+                const renderedOut = renderMarkdown(h.output || '');
                 html += `<div class="history-item">
                     <div class="history-meta"><strong>${esc(formatTs(h.ts))}</strong> • ${esc(h.mode || 'get')} • ${actionsCount} action(s)</div>
                     <div style="margin-top:6px;">${esc(h.prompt || '')}</div>
@@ -914,7 +1022,7 @@
                         <button class="btn btn-secondary" onclick="toggleHistory('${id}')">View</button>
                         <button class="btn" style="margin-left:8px;" onclick="useHistoryPrompt('${encodeURIComponent(h.prompt || '')}')">Ask Again</button>
                     </div>
-                    <div id="hist_${id}" style="display:none; margin-top:8px;" class="ai-output">${esc(h.output || '')}${actionsCount ? `<div style='margin-top:8px;'>${renderActions(h.actions)}</div>` : ''}</div>
+                    <div id="hist_${id}" style="display:none; margin-top:8px;" class="ai-output">${renderedOut}${actionsCount ? `<div style='margin-top:8px;'>${renderActions(h.actions)}</div>` : ''}</div>
                 </div>`;
             });
             cont.innerHTML = html;
@@ -957,11 +1065,12 @@
             return items.map((it, i) => {
                 const id = (it.id || i) + '_srv';
                 const actionsCount = Array.isArray(it.actions) ? it.actions.length : 0;
+                const rendered = renderMarkdown(it.output || '');
                 return `<div class="history-item">
                     <div class="history-meta"><strong>${esc(it.created_at || '')}</strong> • ${esc(it.user_id || '')} • ${esc(it.mode || '')} • ${actionsCount} action(s)</div>
                     <div style="margin-top:6px;">${esc(it.prompt || '')}</div>
                     <div style="margin-top:8px;"><button class="btn btn-secondary" onclick="toggleHistory('${id}')">View</button></div>
-                    <div id="hist_${id}" style="display:none; margin-top:8px;" class="ai-output">${esc(it.output || '')}${actionsCount ? `<div style='margin-top:8px;'>${renderActions(it.actions)}</div>` : ''}</div>
+                    <div id="hist_${id}" style="display:none; margin-top:8px;" class="ai-output">${rendered}${actionsCount ? `<div style='margin-top:8px;'>${renderActions(it.actions)}</div>` : ''}</div>
                 </div>`;
             }).join('');
         }
@@ -1097,11 +1206,12 @@
                 });
                 const data = await resp.json();
                 if (data.success) {
+                    const rendered = renderMarkdown(data.output || '');
                     if (data.mode === 'post' && (data.actions || []).length > 0) {
-                        out.innerHTML = `<div class=\"success\">Proposed changes detected. Please confirm.</div><div class=\"ai-output\">${data.output || ''}</div>`;
+                        out.innerHTML = `<div class=\"success\">Proposed changes detected. Please confirm.</div><div class=\"ai-output\">${rendered}</div>`;
                         openConfirm(data.actions, 'The AI suggests the following changes:');
                     } else {
-                        out.innerHTML = `<div class=\"ai-output\">${data.output || ''}</div>`;
+                        out.innerHTML = `<div class=\"ai-output\">${rendered}</div>`;
                     }
                     addHistoryEntry({ prompt, mode: data.mode, output: data.output, actions: data.actions || [] });
                     logServerHistoryEntry({ prompt, mode: data.mode, output: data.output, actions: data.actions || [] });
